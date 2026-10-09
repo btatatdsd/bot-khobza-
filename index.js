@@ -20,7 +20,7 @@ const path = require('path');
 /* ===================== CONFIG ===================== */
 const TOKEN                  = process.env.DISCORD_TOKEN;
 const PREFIX                 = process.env.PREFIX || '!';
-const WELCOME_CHANNEL_ID     = process.env.WELCOME_CHANNEL_ID || '';
+const WELCOME_CHANNEL_ID     = process.env.WELCOME_CHANNEL_ID || '1558168781677924383';
 const WELCOME_IMAGE          = process.env.WELCOME_IMAGE || '';
 const ROLE_LOG_CHANNEL_ID    = process.env.ROLE_LOG_CHANNEL_ID || '1557761485961171085';
 const MUTE_LOG_CHANNEL_ID    = process.env.MUTE_LOG_CHANNEL_ID || '1558158698805723226';
@@ -57,7 +57,6 @@ const C = { ok: 0x57f287, err: 0xed4245, info: 0x5865f2, warn: 0xfee75c, log: 0x
 const warnings = new Map();
 const afks     = new Map();
 const economy  = new Map();
-const autoMsgs = new Map();
 const settings = { antispam: false, antiinvite: false, antiraid: false, antimention: false, automod: false, logs: '' };
 const spamMap  = new Map();
 const joinLog  = [];
@@ -131,7 +130,6 @@ function saveVoiceConfig(data) {
   } catch (e) { console.error('[VOICE CFG] save err:', e.message); }
 }
 
-// { guildId: channelId }
 const voiceConfig     = loadVoiceConfig();
 const reconnectTimers = new Map();
 
@@ -914,14 +912,18 @@ commands.removevoice = { cat: 'Voice', desc: 'Disconnect bot from voice (24/7 of
  * ============================================================ */
 client.once('ready', async () => {
   console.log(`[READY] Logged in as ${client.user.tag}`);
+  console.log(`[READY] Welcome channel ID: ${WELCOME_CHANNEL_ID}`);
+  console.log(`[READY] Serving ${client.guilds.cache.size} guild(s).`);
   client.user.setActivity('𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷', { type: ActivityType.Watching });
   await restoreAllVoiceConnections();
 });
 
 /* ============================================================
- *                     EVENT: WELCOME
+ *                     EVENT: WELCOME (with debug)
  * ============================================================ */
 client.on('guildMemberAdd', async member => {
+  console.log(`[WELCOME] New member joined: ${member.user.tag} (${member.id})`);
+
   joinLog.push(Date.now());
   while (joinLog.length && Date.now() - joinLog[0] > 10000) joinLog.shift();
   if (settings.antiraid && joinLog.length >= 8) {
@@ -929,18 +931,40 @@ client.on('guildMemberAdd', async member => {
     return;
   }
 
-  if (!WELCOME_CHANNEL_ID) return;
+  if (!WELCOME_CHANNEL_ID) {
+    console.warn('[WELCOME] ❌ WELCOME_CHANNEL_ID is not set in env.');
+    return;
+  }
+
   const ch = member.guild.channels.cache.get(WELCOME_CHANNEL_ID);
-  if (!ch) return;
+  if (!ch) {
+    console.warn(`[WELCOME] ❌ Channel ${WELCOME_CHANNEL_ID} not found in cache.`);
+    return;
+  }
+  if (!ch.isTextBased()) {
+    console.warn(`[WELCOME] ❌ Channel ${WELCOME_CHANNEL_ID} is not text-based.`);
+    return;
+  }
+
+  const me = member.guild.members.me;
+  const perms = ch.permissionsFor(me);
+  console.log(`[WELCOME] Perms — ViewChannel: ${perms?.has('ViewChannel')}, SendMessages: ${perms?.has('SendMessages')}, EmbedLinks: ${perms?.has('EmbedLinks')}`);
+
   const e = new EmbedBuilder()
     .setColor(C.ok)
     .setTitle('🎉 Welcome!')
-    .setDescription(`Welcome ${member} to **𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷**!\nمرحبا بيك في سيرفر **𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷**!`)
+    .setDescription(`مرحبا بيك في سيرفر **𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷** ${member}!\nWelcome to **𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷**!`)
     .setThumbnail(member.user.displayAvatarURL({ size: 256 }))
     .setFooter({ text: `Member #${member.guild.memberCount}` })
     .setTimestamp();
   if (WELCOME_IMAGE) e.setImage(WELCOME_IMAGE);
-  ch.send({ content: `${member}`, embeds: [e] }).catch(()=>{});
+
+  try {
+    await ch.send({ content: `${member}`, embeds: [e] });
+    console.log(`[WELCOME] ✅ Welcome message sent in #${ch.name}`);
+  } catch (err) {
+    console.error('[WELCOME] ❌ Failed to send:', err.message);
+  }
 });
 
 /* ============================================================
