@@ -1,7 +1,7 @@
 {
   "name": "khobza-smp-bot",
   "version": "1.0.0",
-  "description": "Discord bot for 𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 — welcome, logs, moderation, voice 24/7, and 100 commands.",
+  "description": "Discord bot for 𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷",
   "main": "index.js",
   "type": "commonjs",
   "scripts": {
