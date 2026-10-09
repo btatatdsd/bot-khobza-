@@ -1,6 +1,6 @@
 /* ============================================================
  *  𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 Discord Bot  —  single-file
- *  Requires only discord.js + dotenv
+ *  Requires: discord.js + @discordjs/voice + libsodium-wrappers
  * ============================================================ */
 require('dotenv').config();
 
@@ -8,6 +8,14 @@ const {
   Client, GatewayIntentBits, Partials, EmbedBuilder,
   PermissionFlagsBits, ChannelType, ActivityType, AuditLogEvent
 } = require('discord.js');
+
+const {
+  joinVoiceChannel, getVoiceConnection,
+  VoiceConnectionStatus, entersState
+} = require('@discordjs/voice');
+
+const fs   = require('fs');
+const path = require('path');
 
 /* ===================== CONFIG ===================== */
 const TOKEN                  = process.env.DISCORD_TOKEN;
@@ -21,6 +29,9 @@ const KICK_LOG_CHANNEL_ID    = process.env.KICK_LOG_CHANNEL_ID || '';
 const GENERAL_LOG_CHANNEL_ID = process.env.GENERAL_LOG_CHANNEL_ID || '';
 const MC_SERVER_IP           = process.env.MC_SERVER_IP || 'play.khobzasmp.com';
 const MC_STORE_URL           = process.env.MC_STORE_URL || 'https://store.khobzasmp.com';
+const DATA_DIR               = process.env.DATA_DIR || __dirname;
+const VOICE_CFG_FILE         = path.join(DATA_DIR, 'voice-config.json');
+const RECONNECT_DELAY        = 5000;
 
 if (!TOKEN) { console.error('[FATAL] DISCORD_TOKEN missing in env.'); process.exit(1); }
 
@@ -43,13 +54,13 @@ const client = new Client({
 const C = { ok: 0x57f287, err: 0xed4245, info: 0x5865f2, warn: 0xfee75c, log: 0x2b2d31 };
 
 /* ===================== STORES (in-memory) ===================== */
-const warnings = new Map();  // userId -> [{mod, reason, ts}]
-const afks     = new Map();  // userId -> reason
-const economy  = new Map();  // userId -> {balance, daily, rep, xp, msgs}
-const autoMsgs = new Map();  // id -> {channelId, content, interval, remaining, timer}
-const settings = { antispam: false, antiinvite: false, antiraid: false, antimention: false, automod: false };
-const spamMap  = new Map();  // userId -> [timestamps]
-const joinLog  = [];         // recent joins for anti-raid
+const warnings = new Map();
+const afks     = new Map();
+const economy  = new Map();
+const autoMsgs = new Map();
+const settings = { antispam: false, antiinvite: false, antiraid: false, antimention: false, automod: false, logs: '' };
+const spamMap  = new Map();
+const joinLog  = [];
 
 /* ===================== HELPERS ===================== */
 const em = (color, title, desc) => {
@@ -105,8 +116,92 @@ function eco(id) {
   return economy.get(id);
 }
 
+/* ===================== VOICE 24/7 SYSTEM ===================== */
+function loadVoiceConfig() {
+  try {
+    if (fs.existsSync(VOICE_CFG_FILE))
+      return JSON.parse(fs.readFileSync(VOICE_CFG_FILE, 'utf8'));
+  } catch (e) { console.error('[VOICE CFG] load err:', e.message); }
+  return {};
+}
+function saveVoiceConfig(data) {
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(VOICE_CFG_FILE, JSON.stringify(data, null, 2));
+  } catch (e) { console.error('[VOICE CFG] save err:', e.message); }
+}
+
+// { guildId: channelId }
+const voiceConfig     = loadVoiceConfig();
+const reconnectTimers = new Map();
+
+async function connectToVoice(guild, channelId) {
+  const channel = guild.channels.cache.get(channelId);
+  if (!channel) throw new Error(`Channel not found: ${channelId}`);
+  if (channel.type !== ChannelType.GuildVoice && channel.type !== ChannelType.GuildStageVoice)
+    throw new Error('Target is not a voice channel.');
+
+  const me = guild.members.me || (await guild.members.fetch(client.user.id));
+  const perms = channel.permissionsFor(me);
+  if (!perms?.has(PermissionFlagsBits.Connect)) throw new Error('Missing **Connect** permission.');
+  if (!perms?.has(PermissionFlagsBits.Speak))   throw new Error('Missing **Speak** permission.');
+
+  const existing = getVoiceConnection(guild.id);
+  if (existing) { try { existing.destroy(); } catch {} }
+
+  const connection = joinVoiceChannel({
+    channelId: channel.id,
+    guildId:   guild.id,
+    adapterCreator: guild.voiceAdapterCreator,
+    selfDeaf: true,
+    selfMute: true
+  });
+
+  connection.on(VoiceConnectionStatus.Ready, () => {
+    console.log(`[VOICE] ✅ Ready in ${guild.name} → #${channel.name}`);
+  });
+
+  connection.on(VoiceConnectionStatus.Disconnected, async () => {
+    try {
+      await Promise.race([
+        entersState(connection, VoiceConnectionStatus.Signalling, 5000),
+        entersState(connection, VoiceConnectionStatus.Connecting, 5000)
+      ]);
+    } catch {
+      try { connection.destroy(); } catch {}
+      if (reconnectTimers.has(guild.id)) return;
+      const t = setTimeout(async () => {
+        reconnectTimers.delete(guild.id);
+        const saved = voiceConfig[guild.id];
+        if (!saved) return;
+        try {
+          await connectToVoice(guild, saved);
+          console.log(`[VOICE] 🔄 Reconnected in ${guild.name}`);
+        } catch (e) {
+          console.error(`[VOICE] reconnect failed in ${guild.name}:`, e.message);
+        }
+      }, RECONNECT_DELAY);
+      reconnectTimers.set(guild.id, t);
+    }
+  });
+
+  return connection;
+}
+
+async function restoreAllVoiceConnections() {
+  for (const [guildId, channelId] of Object.entries(voiceConfig)) {
+    const guild = client.guilds.cache.get(guildId);
+    if (!guild) { console.warn(`[VOICE] Guild ${guildId} not found, skipping.`); continue; }
+    try {
+      await connectToVoice(guild, channelId);
+    } catch (e) {
+      console.error(`[VOICE] restore failed (${guildId}):`, e.message);
+    }
+  }
+}
+
 /* ============================================================
- *                       COMMANDS (100)
+ *                       COMMANDS (100+)
  * ============================================================ */
 const commands = {};
 
@@ -775,19 +870,58 @@ commands.unlink = { cat: 'SMP', desc: 'Unlink Discord from MC account', async ru
   m.reply({ embeds: [okE('✅ Request sent')] });
 }};
 
+/* ---------- VOICE (2) ---------- */
+commands.addvoice = { cat: 'Voice', desc: 'Join a voice channel 24/7', usage: 'addvoice <voiceChannelId>', async run(m, a) {
+  if (!has(m.member, PermissionFlagsBits.Administrator))
+    return m.reply({ embeds: [errE('❌ Admin only.')] });
+
+  const id = (a[0] || '').replace(/[<#>]/g, '').trim();
+  if (!id || !/^\d{17,20}$/.test(id))
+    return m.reply({ embeds: [errE('Usage: `addvoice <voiceChannelId>` — provide a valid ID.')] });
+
+  const ch = m.guild.channels.cache.get(id);
+  if (!ch) return m.reply({ embeds: [errE('❌ Channel not found in this server.')] });
+  if (ch.type !== ChannelType.GuildVoice && ch.type !== ChannelType.GuildStageVoice)
+    return m.reply({ embeds: [errE('❌ The given ID is not a voice channel.')] });
+
+  try {
+    await connectToVoice(m.guild, ch.id);
+    voiceConfig[m.guild.id] = ch.id;
+    saveVoiceConfig(voiceConfig);
+    m.reply({ embeds: [okE('🔊 Voice Connected', `Joined ${ch} — the bot will stay **24/7**.\nSaved persistently.`)] });
+  } catch (e) {
+    m.reply({ embeds: [errE('❌ Failed to connect', e.message)] });
+  }
+}};
+
+commands.removevoice = { cat: 'Voice', desc: 'Disconnect bot from voice (24/7 off)', async run(m) {
+  if (!has(m.member, PermissionFlagsBits.Administrator))
+    return m.reply({ embeds: [errE('❌ Admin only.')] });
+
+  const conn = getVoiceConnection(m.guild.id);
+  if (conn) { try { conn.destroy(); } catch {} }
+  if (reconnectTimers.has(m.guild.id)) { clearTimeout(reconnectTimers.get(m.guild.id)); reconnectTimers.delete(m.guild.id); }
+
+  const had = !!voiceConfig[m.guild.id];
+  delete voiceConfig[m.guild.id];
+  saveVoiceConfig(voiceConfig);
+
+  m.reply({ embeds: [okE('🔇 Voice Disconnected', had ? 'Saved channel removed.' : 'Bot was not in a saved channel.')] });
+}};
+
 /* ============================================================
  *                     EVENT: READY
  * ============================================================ */
-client.once('ready', () => {
+client.once('ready', async () => {
   console.log(`[READY] Logged in as ${client.user.tag}`);
   client.user.setActivity('𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷', { type: ActivityType.Watching });
+  await restoreAllVoiceConnections();
 });
 
 /* ============================================================
  *                     EVENT: WELCOME
  * ============================================================ */
 client.on('guildMemberAdd', async member => {
-  // Anti-raid
   joinLog.push(Date.now());
   while (joinLog.length && Date.now() - joinLog[0] > 10000) joinLog.shift();
   if (settings.antiraid && joinLog.length >= 8) {
@@ -810,10 +944,30 @@ client.on('guildMemberAdd', async member => {
 });
 
 /* ============================================================
+ *                     EVENT: VOICE STATE
+ * ============================================================ */
+client.on('voiceStateUpdate', async (oldState, newState) => {
+  if (newState.id !== client.user.id) return;
+  if (!newState.guild) return;
+
+  const saved = voiceConfig[newState.guild.id];
+  if (!saved) return;
+
+  if (newState.channelId && newState.channelId !== saved) {
+    if (reconnectTimers.has(newState.guild.id)) return;
+    const t = setTimeout(async () => {
+      reconnectTimers.delete(newState.guild.id);
+      try { await connectToVoice(newState.guild, saved); }
+      catch (e) { console.error('[VOICE] move-back failed:', e.message); }
+    }, 2000);
+    reconnectTimers.set(newState.guild.id, t);
+  }
+});
+
+/* ============================================================
  *                     EVENT: LOGS
  * ============================================================ */
 client.on('guildMemberUpdate', async (oldM, newM) => {
-  // Nickname
   if (oldM.nickname !== newM.nickname) {
     const exec = await auditExec(newM.guild, AuditLogEvent.MemberUpdate, newM.id);
     const e = infoE('✏️ Nickname Changed').addFields(
@@ -823,7 +977,6 @@ client.on('guildMemberUpdate', async (oldM, newM) => {
       { name: 'By', value: exec ? exec.tag : 'Unknown' });
     sendLog(newM.guild, settings.logs || GENERAL_LOG_CHANNEL_ID, e);
   }
-  // Roles
   const added = newM.roles.cache.filter(r => !oldM.roles.cache.has(r.id));
   const removed = oldM.roles.cache.filter(r => !newM.roles.cache.has(r.id));
   if (added.size || removed.size) {
@@ -889,21 +1042,17 @@ client.on('channelDelete', ch => {
 client.on('messageCreate', async message => {
   if (!message.guild || message.author.bot) return;
 
-  // AFK remove on activity
   if (afks.has(message.author.id) && !message.content.startsWith(PREFIX + 'afk')) {
     afks.delete(message.author.id);
     message.reply({ embeds: [okE('👋 Welcome back', 'AFK removed.')] }).then(x => setTimeout(() => x.delete().catch(()=>{}), 5000));
   }
-  // AFK mention notify
   for (const u of message.mentions.users.values()) {
     if (afks.has(u.id)) message.reply({ embeds: [infoE('💤 AFK', `${u.tag} is AFK: ${afks.get(u.id)}`)] }).catch(()=>{});
   }
 
-  // XP counter
   const user = eco(message.author.id);
   user.msgs += 1;
 
-  // ==== PROTECTION ====
   if (settings.antispam && !has(message.member, PermissionFlagsBits.ManageMessages)) {
     const now = Date.now();
     const arr = (spamMap.get(message.author.id) || []).filter(t => now - t < 5000);
@@ -927,7 +1076,6 @@ client.on('messageCreate', async message => {
     if (bad.some(w => message.content.toLowerCase().includes(w))) message.delete().catch(()=>{});
   }
 
-  // ==== COMMAND DISPATCH ====
   if (!message.content.startsWith(PREFIX)) return;
   const args = message.content.slice(PREFIX.length).trim().split(/\s+/);
   const name = args.shift().toLowerCase();
