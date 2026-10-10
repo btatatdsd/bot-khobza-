@@ -6,7 +6,8 @@ require('dotenv').config();
 const {
   Client, GatewayIntentBits, Partials, EmbedBuilder,
   PermissionFlagsBits, ChannelType, ActivityType, AuditLogEvent,
-  ActionRowBuilder, ButtonBuilder, ButtonStyle, Events
+  ActionRowBuilder, ButtonBuilder, ButtonStyle, Events,
+  ModalBuilder, TextInputBuilder, TextInputStyle
 } = require('discord.js');
 const { joinVoiceChannel, getVoiceConnection, VoiceConnectionStatus, entersState } = require('@discordjs/voice');
 const fs = require('fs');
@@ -31,6 +32,8 @@ const VERIFY_CHANNEL_ID      = process.env.VERIFY_CHANNEL_ID || '155850339322653
 const VERIFY_IMAGE           = process.env.VERIFY_IMAGE || '';
 const UNVERIFIED_ROLE_ID     = process.env.UNVERIFIED_ROLE_ID || '1557761141575262298';
 const VERIFIED_ROLE_ID       = process.env.VERIFIED_ROLE_ID || '1557761111242051704';
+const APPLY_STAFF_CHANNEL_ID = process.env.APPLY_STAFF_CHANNEL_ID || '1557761363617521724';
+const APPLY_RESULTS_CHANNEL_ID = process.env.APPLY_RESULTS_CHANNEL_ID || '1558583636025147505';
 
 if (!TOKEN) { console.error('[FATAL] DISCORD_TOKEN missing.'); process.exit(1); }
 
@@ -49,7 +52,7 @@ const client = new Client({
   partials: [Partials.Channel, Partials.Message, Partials.GuildMember, Partials.User, Partials.Reaction]
 });
 
-const C = { ok: 0x57f287, err: 0xed4245, info: 0x5865f2 };
+const C = { ok: 0x57f287, err: 0xed4245, info: 0x5865f2, warn: 0xfee75c };
 
 /* ===================== STORES ===================== */
 const warnings = new Map();
@@ -58,6 +61,7 @@ const economy  = new Map();
 const settings = { antispam: false, antiinvite: false, antiraid: false, antimention: false, automod: false, logs: '' };
 const spamMap  = new Map();
 const joinLog  = [];
+const applications = new Map(); // msgId -> { userId, type, answers }
 
 /* ===================== HELPERS ===================== */
 const em = (color, title, desc) => {
@@ -156,8 +160,7 @@ async function connectToVoice(guild, channelId) {
       const t = setTimeout(async () => {
         reconnectTimers.delete(guild.id);
         const saved = voiceConfig[guild.id]; if (!saved) return;
-        try { await connectToVoice(guild, saved); console.log(`[VOICE] 🔄 Reconnected`); }
-        catch (e) { console.error('[VOICE] reconnect:', e.message); }
+        try { await connectToVoice(guild, saved); } catch (e) { console.error('[VOICE] reconnect:', e.message); }
       }, RECONNECT_DELAY);
       reconnectTimers.set(guild.id, t);
     }
@@ -175,14 +178,12 @@ async function restoreAllVoiceConnections() {
 
 /* ===================== WELCOME FUNCTION ===================== */
 async function sendWelcome(guild, member) {
-  console.log(`[WELCOME] Trying to send for ${member.user.tag}...`);
-  if (!WELCOME_CHANNEL_ID) { console.error('[WELCOME] ❌ ID empty'); return { ok: false, reason: 'ID empty' }; }
+  if (!WELCOME_CHANNEL_ID) return { ok: false, reason: 'ID empty' };
   let ch = guild.channels.cache.get(WELCOME_CHANNEL_ID);
   if (!ch) ch = await guild.channels.fetch(WELCOME_CHANNEL_ID).catch(()=>null);
   if (!ch) return { ok: false, reason: 'Channel not found' };
   if (!ch.isTextBased()) return { ok: false, reason: 'Not text-based' };
-  const me = guild.members.me;
-  const perms = ch.permissionsFor(me);
+  const perms = ch.permissionsFor(guild.members.me);
   if (!perms?.has(PermissionFlagsBits.ViewChannel)) return { ok: false, reason: 'Missing View' };
   if (!perms?.has(PermissionFlagsBits.SendMessages)) return { ok: false, reason: 'Missing Send' };
 
@@ -197,12 +198,8 @@ async function sendWelcome(guild, member) {
 
   try {
     await ch.send({ content: `${member}`, embeds: [embed] });
-    console.log(`[WELCOME] ✅ Sent to #${ch.name}`);
     return { ok: true, channel: ch };
-  } catch (err) {
-    console.error('[WELCOME] ❌ Send failed:', err.message);
-    return { ok: false, reason: err.message };
-  }
+  } catch (err) { return { ok: false, reason: err.message }; }
 }
 
 /* ============================================================
@@ -211,15 +208,10 @@ async function sendWelcome(guild, member) {
 const commands = {};
 
 /* ---------- VERIFY ---------- */
-commands.verifypanel = { cat: 'Verify', desc: 'Send the verification panel', async run(m) {
-  if (!has(m.member, PermissionFlagsBits.Administrator))
-    return m.reply({ embeds: [errE('❌ Admin only.')] });
-
-  const ch = m.guild.channels.cache.get(VERIFY_CHANNEL_ID)
-          || await m.guild.channels.fetch(VERIFY_CHANNEL_ID).catch(()=>null);
-
-  if (!ch || !ch.isTextBased())
-    return m.reply({ embeds: [errE(`❌ Channel <#${VERIFY_CHANNEL_ID}> not found.`)] });
+commands.verifypanel = { cat: 'Verify', desc: 'Send verification panel', async run(m) {
+  if (!has(m.member, PermissionFlagsBits.Administrator)) return m.reply({ embeds: [errE('❌ Admin only.')] });
+  const ch = m.guild.channels.cache.get(VERIFY_CHANNEL_ID) || await m.guild.channels.fetch(VERIFY_CHANNEL_ID).catch(()=>null);
+  if (!ch || !ch.isTextBased()) return m.reply({ embeds: [errE(`❌ Channel <#${VERIFY_CHANNEL_ID}> not found.`)] });
 
   const embed = new EmbedBuilder()
     .setColor(0x2b2d31)
@@ -229,7 +221,7 @@ commands.verifypanel = { cat: 'Verify', desc: 'Send the verification panel', asy
       'باش توصل لجميع الرومات، خاصك تدير التحقق.\n' +
       'كليكي على الزر تحت باش تأخذ الـ Verified role.\n\n' +
       '**Welcome to 𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷!**\n' +
-      'Click the button below to verify and gain access to all channels.'
+      'Click the button below to verify and get access to all channels.'
     )
     .setFooter({ text: '𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 • Verification System' })
     .setTimestamp();
@@ -237,11 +229,35 @@ commands.verifypanel = { cat: 'Verify', desc: 'Send the verification panel', asy
   if (VERIFY_IMAGE) embed.setImage(VERIFY_IMAGE);
 
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId('verify_button')
-      .setLabel('Verify')
-      .setEmoji('✅')
-      .setStyle(ButtonStyle.Success)
+    new ButtonBuilder().setCustomId('verify_button').setLabel('Verify').setEmoji('✅').setStyle(ButtonStyle.Success)
+  );
+
+  await ch.send({ embeds: [embed], components: [row] });
+  m.reply({ embeds: [okE('✅ Panel sent', `In ${ch}`)] }).catch(()=>{});
+}};
+
+/* ---------- APPLY STAFF PANEL ---------- */
+commands.applypanel = { cat: 'Verify', desc: 'Send apply staff panel', async run(m) {
+  if (!has(m.member, PermissionFlagsBits.Administrator)) return m.reply({ embeds: [errE('❌ Admin only.')] });
+  const ch = m.guild.channels.cache.get(APPLY_STAFF_CHANNEL_ID) || await m.guild.channels.fetch(APPLY_STAFF_CHANNEL_ID).catch(()=>null);
+  if (!ch || !ch.isTextBased()) return m.reply({ embeds: [errE(`❌ Channel <#${APPLY_STAFF_CHANNEL_ID}> not found.`)] });
+
+  const embed = new EmbedBuilder()
+    .setColor(0x5865f2)
+    .setTitle('📝 Apply for Staff — 𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷')
+    .setDescription(
+      '**بغيتي تولي Staff فـ 𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷؟**\n\n' +
+      'اختار النوع اللي بغيتي تقدم عليه:\n\n' +
+      '🎮 **Apply Staff Minecraft** — Staff داخل السيرفر\n' +
+      '💬 **Apply Staff Discord** — Staff فـ الديسكورد\n\n' +
+      'كليكي على الزر المناسب وغادي تفتح ليك استمارة. جاوب بصدق وكامل الأسئلة.'
+    )
+    .setFooter({ text: '𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 • Applications' })
+    .setTimestamp();
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('apply_minecraft').setLabel('Apply Staff Minecraft').setEmoji('🎮').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('apply_discord').setLabel('Apply Staff Discord').setEmoji('💬').setStyle(ButtonStyle.Primary)
   );
 
   await ch.send({ embeds: [embed], components: [row] });
@@ -249,43 +265,34 @@ commands.verifypanel = { cat: 'Verify', desc: 'Send the verification panel', asy
 }};
 
 /* ---------- DIAGNOSTIC ---------- */
-commands.testwelcome = { cat: 'Utility', desc: 'Test welcome message', async run(m) {
+commands.testwelcome = { cat: 'Utility', desc: 'Test welcome', async run(m) {
   if (!has(m.member, PermissionFlagsBits.Administrator)) return m.reply({ embeds: [errE('❌ Admin only.')] });
-  m.reply({ embeds: [infoE('🧪 Testing...')] });
   const r = await sendWelcome(m.guild, m.member).catch(e => ({ ok: false, reason: e.message }));
-  if (r.ok) m.channel.send({ embeds: [okE('✅ Success', `Sent to ${r.channel}`)] });
-  else m.channel.send({ embeds: [errE('❌ Failed', r.reason)] });
+  if (r.ok) m.reply({ embeds: [okE('✅ Sent', `${r.channel}`)] });
+  else m.reply({ embeds: [errE('❌ Failed', r.reason)] });
 }};
 commands.checkwelcome = { cat: 'Utility', desc: 'Check welcome setup', async run(m) {
   if (!has(m.member, PermissionFlagsBits.Administrator)) return m.reply({ embeds: [errE('❌ Admin only.')] });
-  const lines = [`**WELCOME_CHANNEL_ID**: \`${WELCOME_CHANNEL_ID}\``];
+  const lines = [`**Welcome ID**: \`${WELCOME_CHANNEL_ID}\``];
   const ch = m.guild.channels.cache.get(WELCOME_CHANNEL_ID) || await m.guild.channels.fetch(WELCOME_CHANNEL_ID).catch(()=>null);
   if (!ch) lines.push('**Channel**: ❌ Not found');
   else {
     lines.push(`**Channel**: ✅ ${ch}`);
-    lines.push(`**Type**: \`${ch.type}\` ${ch.isTextBased() ? '✅' : '❌'}`);
-    const perms = ch.permissionsFor(m.guild.members.me);
-    lines.push(`**View**: ${perms?.has('ViewChannel') ? '✅' : '❌'}`);
-    lines.push(`**Send**: ${perms?.has('SendMessages') ? '✅' : '❌'}`);
-    lines.push(`**Embed**: ${perms?.has('EmbedLinks') ? '✅' : '❌'}`);
+    lines.push(`**Type**: ${ch.type}`);
+    const p = ch.permissionsFor(m.guild.members.me);
+    lines.push(`**View**: ${p?.has('ViewChannel') ? '✅' : '❌'} | **Send**: ${p?.has('SendMessages') ? '✅' : '❌'} | **Embed**: ${p?.has('EmbedLinks') ? '✅' : '❌'}`);
   }
-  m.reply({ embeds: [infoE('🔍 Welcome Check').setDescription(lines.join('\n'))] });
+  m.reply({ embeds: [infoE('🔍 Check').setDescription(lines.join('\n'))] });
 }};
 commands.intents = { cat: 'Utility', desc: 'Check intents', async run(m) {
   if (!has(m.member, PermissionFlagsBits.Administrator)) return m.reply({ embeds: [errE('❌ Admin only.')] });
   m.reply({ embeds: [infoE('🔍 Intents').setDescription(
-    `**Guilds**: ${client.guilds.cache.size}\n` +
-    `**Member Count**: ${m.guild.memberCount}\n` +
-    `**Cached**: ${m.guild.members.cache.size}\n\n` +
-    `**Members Intent**: ${m.guild.members.cache.size > 1 ? '✅ Likely ON' : '❌ Likely OFF'}`
+    `**Guilds**: ${client.guilds.cache.size}\n**Members**: ${m.guild.memberCount}\n**Cached**: ${m.guild.members.cache.size}\n\n**Members Intent**: ${m.guild.members.cache.size > 1 ? '✅ ON' : '❌ OFF'}`
   )] });
 }};
-commands.dumpchannels = { cat: 'Utility', desc: 'Dump all channels', async run(m) {
+commands.dumpchannels = { cat: 'Utility', desc: 'Dump channels', async run(m) {
   if (!has(m.member, PermissionFlagsBits.Administrator)) return m.reply({ embeds: [errE('❌ Admin only.')] });
-  const list = m.guild.channels.cache.map(c => {
-    const t = c.type === ChannelType.GuildVoice ? '🔊' : (c.type === ChannelType.GuildCategory ? '📁' : '#');
-    return `${t} \`${c.id}\` — ${c.name}`;
-  }).join('\n').slice(0, 4000);
+  const list = m.guild.channels.cache.map(c => `${c.type === ChannelType.GuildVoice ? '🔊' : '#'} \`${c.id}\` — ${c.name}`).join('\n').slice(0, 4000);
   m.reply({ embeds: [infoE('📋 Channels').setDescription(list || 'None')] });
 }};
 
@@ -351,52 +358,52 @@ commands.clearwarns = { cat: 'Moderation', desc: 'Clear warnings', usage: 'clear
   warnings.delete(u.id);
   m.reply({ embeds: [okE('✅ Cleared', u.tag)] });
 }};
-commands.purge = { cat: 'Moderation', desc: 'Delete messages', usage: 'purge <1-100>', async run(m, a) {
+commands.purge = { cat: 'Moderation', desc: 'Purge', usage: 'purge <1-100>', async run(m, a) {
   if (!has(m.member, PermissionFlagsBits.ManageMessages)) return m.reply({ embeds: [errE('❌ No permission.')] });
   const n = Math.min(Math.max(parseInt(a[0]) || 0, 1), 100);
   const del = await m.channel.bulkDelete(n, true).catch(()=>null);
   if (del) m.channel.send({ embeds: [okE('🧹 Purged', `${del.size} messages.`)] }).then(msg => setTimeout(() => msg.delete().catch(()=>{}), 4000));
 }};
 commands.clear = commands.purge;
-commands.slowmode = { cat: 'Moderation', desc: 'Slowmode', usage: 'slowmode <seconds>', async run(m, a) {
+commands.slowmode = { cat: 'Moderation', desc: 'Slowmode', usage: 'slowmode <sec>', async run(m, a) {
   if (!has(m.member, PermissionFlagsBits.ManageChannels)) return m.reply({ embeds: [errE('❌ No permission.')] });
   const s = Math.min(Math.max(parseInt(a[0]) || 0, 0), 21600);
   await m.channel.setRateLimitPerUser(s).catch(()=>{});
-  m.reply({ embeds: [okE('⏱️ Slowmode', `${s}s`)] });
+  m.reply({ embeds: [okE('⏱️', `${s}s`)] });
 }};
-commands.lock = { cat: 'Moderation', desc: 'Lock channel', async run(m, a) {
+commands.lock = { cat: 'Moderation', desc: 'Lock', async run(m, a) {
   if (!has(m.member, PermissionFlagsBits.ManageChannels)) return m.reply({ embeds: [errE('❌ No permission.')] });
   const ch = m.mentions.channels.first() || m.channel;
   await ch.permissionOverwrites.edit(m.guild.roles.everyone, { SendMessages: false }).catch(()=>{});
-  m.reply({ embeds: [okE('🔒 Locked', `${ch}`)] });
+  m.reply({ embeds: [okE('🔒', `${ch}`)] });
 }};
-commands.unlock = { cat: 'Moderation', desc: 'Unlock channel', async run(m, a) {
+commands.unlock = { cat: 'Moderation', desc: 'Unlock', async run(m, a) {
   if (!has(m.member, PermissionFlagsBits.ManageChannels)) return m.reply({ embeds: [errE('❌ No permission.')] });
   const ch = m.mentions.channels.first() || m.channel;
   await ch.permissionOverwrites.edit(m.guild.roles.everyone, { SendMessages: null }).catch(()=>{});
-  m.reply({ embeds: [okE('🔓 Unlocked', `${ch}`)] });
+  m.reply({ embeds: [okE('🔓', `${ch}`)] });
 }};
 commands.lockall = { cat: 'Moderation', desc: 'Lock all', async run(m) {
   if (!has(m.member, PermissionFlagsBits.Administrator)) return m.reply({ embeds: [errE('❌ Admin.')] });
   let n = 0; for (const [, ch] of m.guild.channels.cache) if (ch.isTextBased()) { await ch.permissionOverwrites.edit(m.guild.roles.everyone, { SendMessages: false }).catch(()=>{}); n++; }
-  m.reply({ embeds: [okE('🔒 Locked', `${n} channels`)] });
+  m.reply({ embeds: [okE('🔒', `${n}`)] });
 }};
 commands.unlockall = { cat: 'Moderation', desc: 'Unlock all', async run(m) {
   if (!has(m.member, PermissionFlagsBits.Administrator)) return m.reply({ embeds: [errE('❌ Admin.')] });
   let n = 0; for (const [, ch] of m.guild.channels.cache) if (ch.isTextBased()) { await ch.permissionOverwrites.edit(m.guild.roles.everyone, { SendMessages: null }).catch(()=>{}); n++; }
-  m.reply({ embeds: [okE('🔓 Unlocked', `${n} channels`)] });
+  m.reply({ embeds: [okE('🔓', `${n}`)] });
 }};
 commands.softban = { cat: 'Moderation', desc: 'Softban', usage: 'softban <@user>', async run(m, a) {
   if (!has(m.member, PermissionFlagsBits.BanMembers)) return m.reply({ embeds: [errE('❌ No permission.')] });
   const t = await resolveMember(m, a[0]); if (!t) return m.reply({ embeds: [errE('Not found.')] });
-  try { await m.guild.bans.create(t.id, { deleteMessageSeconds: 604800 }); await m.guild.bans.remove(t.id); m.reply({ embeds: [okE('🧹 Softbanned', t.user.tag)] }); } catch (e) { m.reply({ embeds: [errE('Failed', e.message)] }); }
+  try { await m.guild.bans.create(t.id, { deleteMessageSeconds: 604800 }); await m.guild.bans.remove(t.id); m.reply({ embeds: [okE('🧹', t.user.tag)] }); } catch (e) { m.reply({ embeds: [errE('Failed', e.message)] }); }
 }};
-commands.hackban = { cat: 'Moderation', desc: 'Ban by ID', usage: 'hackban <id>', async run(m, a) {
+commands.hackban = { cat: 'Moderation', desc: 'Hackban', usage: 'hackban <id>', async run(m, a) {
   if (!has(m.member, PermissionFlagsBits.BanMembers)) return m.reply({ embeds: [errE('❌ No permission.')] });
   if (!a[0]) return m.reply({ embeds: [errE('Provide ID.')] });
-  try { await m.guild.bans.create(a[0]); m.reply({ embeds: [okE('🔨 Hackbanned', `\`${a[0]}\``)] }); } catch (e) { m.reply({ embeds: [errE('Failed', e.message)] }); }
+  try { await m.guild.bans.create(a[0]); m.reply({ embeds: [okE('🔨', `\`${a[0]}\``)] }); } catch (e) { m.reply({ embeds: [errE('Failed', e.message)] }); }
 }};
-commands.massban = { cat: 'Moderation', desc: 'Ban multiple', usage: 'massban id1,id2', async run(m, a) {
+commands.massban = { cat: 'Moderation', desc: 'Massban', usage: 'massban id1,id2', async run(m, a) {
   if (!has(m.member, PermissionFlagsBits.BanMembers)) return m.reply({ embeds: [errE('❌ No permission.')] });
   const ids = (a[0] || '').split(',').map(x => x.trim()).filter(Boolean);
   if (!ids.length) return m.reply({ embeds: [errE('Provide IDs.')] });
@@ -432,7 +439,7 @@ commands.banner = { cat: 'Members', desc: 'Banner', usage: 'banner [@user]', asy
   if (!full.banner) return m.reply({ embeds: [errE('No banner.')] });
   m.reply({ embeds: [infoE(`🖼️ ${u.tag}`).setImage(full.bannerURL({ size: 1024 }))] });
 }};
-commands.membercount = { cat: 'Members', desc: 'Count', async run(m) { m.reply({ embeds: [infoE('👥 Members', `${m.guild.memberCount}`)] }); }};
+commands.membercount = { cat: 'Members', desc: 'Count', async run(m) { m.reply({ embeds: [infoE('👥', `${m.guild.memberCount}`)] }); }};
 commands.roleinfo = { cat: 'Members', desc: 'Role info', usage: 'roleinfo <@role>', async run(m, a) {
   const r = m.mentions.roles.first() || m.guild.roles.cache.get(a[0]);
   if (!r) return m.reply({ embeds: [errE('Not found.')] });
@@ -441,49 +448,49 @@ commands.roleinfo = { cat: 'Members', desc: 'Role info', usage: 'roleinfo <@role
 commands.roles = { cat: 'Members', desc: 'List roles', async run(m) {
   m.reply({ embeds: [infoE('🏷️ Roles').setDescription(m.guild.roles.cache.sort((a,b)=>b.position-a.position).map(r => r.toString()).join(' ').slice(0, 4000))] });
 }};
-commands.nickname = { cat: 'Members', desc: 'Set nickname', usage: 'nickname <@user> <name>', async run(m, a) {
+commands.nickname = { cat: 'Members', desc: 'Nickname', usage: 'nickname <@user> <name>', async run(m, a) {
   if (!has(m.member, PermissionFlagsBits.ManageNicknames)) return m.reply({ embeds: [errE('❌ No permission.')] });
   const t = await resolveMember(m, a[0]); if (!t) return m.reply({ embeds: [errE('Not found.')] });
   await t.setNickname(a.slice(1).join(' ').slice(0, 32) || null).catch(e => m.reply({ embeds: [errE('Failed', e.message)] }));
-  m.reply({ embeds: [okE('✏️ Updated')] });
+  m.reply({ embeds: [okE('✏️')] });
 }};
-commands.resetnick = { cat: 'Members', desc: 'Reset nickname', usage: 'resetnick <@user>', async run(m, a) {
+commands.resetnick = { cat: 'Members', desc: 'Reset nick', usage: 'resetnick <@user>', async run(m, a) {
   if (!has(m.member, PermissionFlagsBits.ManageNicknames)) return m.reply({ embeds: [errE('❌ No permission.')] });
   const t = await resolveMember(m, a[0]); if (!t) return m.reply({ embeds: [errE('Not found.')] });
   await t.setNickname(null).catch(()=>{});
-  m.reply({ embeds: [okE('↩️ Reset')] });
+  m.reply({ embeds: [okE('↩️')] });
 }};
 commands.addrole = { cat: 'Members', desc: 'Add role', usage: 'addrole <@user> <@role>', async run(m, a) {
   if (!has(m.member, PermissionFlagsBits.ManageRoles)) return m.reply({ embeds: [errE('❌ No permission.')] });
   const t = await resolveMember(m, a[0]); const r = m.mentions.roles.first();
   if (!t || !r) return m.reply({ embeds: [errE('Usage: addrole @user @role')] });
   await t.roles.add(r).catch(e => m.reply({ embeds: [errE('Failed', e.message)] }));
-  m.reply({ embeds: [okE('✅ Added', `${r} → ${t.user.tag}`)] });
+  m.reply({ embeds: [okE('✅', `${r} → ${t.user.tag}`)] });
 }};
 commands.removerole = { cat: 'Members', desc: 'Remove role', usage: 'removerole <@user> <@role>', async run(m, a) {
   if (!has(m.member, PermissionFlagsBits.ManageRoles)) return m.reply({ embeds: [errE('❌ No permission.')] });
   const t = await resolveMember(m, a[0]); const r = m.mentions.roles.first();
   if (!t || !r) return m.reply({ embeds: [errE('Usage: removerole @user @role')] });
   await t.roles.remove(r).catch(e => m.reply({ embeds: [errE('Failed', e.message)] }));
-  m.reply({ embeds: [okE('✅ Removed', `${r} ✖ ${t.user.tag}`)] });
+  m.reply({ embeds: [okE('✅', `${r} ✖ ${t.user.tag}`)] });
 }};
 commands.createrole = { cat: 'Members', desc: 'Create role', usage: 'createrole <name>', async run(m, a) {
   if (!has(m.member, PermissionFlagsBits.ManageRoles)) return m.reply({ embeds: [errE('❌ No permission.')] });
   const r = await m.guild.roles.create({ name: a.join(' ') }).catch(()=>null);
-  if (r) m.reply({ embeds: [okE('✅ Created', r.toString())] });
+  if (r) m.reply({ embeds: [okE('✅', r.toString())] });
 }};
 commands.deleterole = { cat: 'Members', desc: 'Delete role', async run(m) {
   if (!has(m.member, PermissionFlagsBits.ManageRoles)) return m.reply({ embeds: [errE('❌ No permission.')] });
-  const r = m.mentions.roles.first(); if (!r) return m.reply({ embeds: [errE('Mention a role.')] });
+  const r = m.mentions.roles.first(); if (!r) return m.reply({ embeds: [errE('Mention.')] });
   await r.delete().catch(()=>{});
-  m.reply({ embeds: [okE('🗑️ Deleted')] });
+  m.reply({ embeds: [okE('🗑️')] });
 }};
 commands.roleall = { cat: 'Members', desc: 'Role to all', usage: 'roleall <@role>', async run(m, a) {
   if (!has(m.member, PermissionFlagsBits.Administrator)) return m.reply({ embeds: [errE('❌ Admin.')] });
   const r = m.mentions.roles.first(); if (!r) return m.reply({ embeds: [errE('Mention.')] });
   const members = await m.guild.members.fetch(); let n = 0;
   for (const [, mem] of members) if (!mem.user.bot) { await mem.roles.add(r).catch(()=>{}); n++; }
-  m.reply({ embeds: [okE('✅ Done', `${n} members`)] });
+  m.reply({ embeds: [okE('✅', `${n}`)] });
 }};
 commands.rolehumans = commands.roleall;
 commands.rolebots = { cat: 'Members', desc: 'Role to bots', usage: 'rolebots <@role>', async run(m, a) {
@@ -491,22 +498,22 @@ commands.rolebots = { cat: 'Members', desc: 'Role to bots', usage: 'rolebots <@r
   const r = m.mentions.roles.first(); if (!r) return m.reply({ embeds: [errE('Mention.')] });
   const members = await m.guild.members.fetch(); let n = 0;
   for (const [, mem] of members) if (mem.user.bot) { await mem.roles.add(r).catch(()=>{}); n++; }
-  m.reply({ embeds: [okE('✅ Done', `${n} bots`)] });
+  m.reply({ embeds: [okE('✅', `${n}`)] });
 }};
-commands.move = { cat: 'Members', desc: 'Move to voice', usage: 'move <@user> <#voice>', async run(m, a) {
+commands.move = { cat: 'Members', desc: 'Move', usage: 'move <@user> <#voice>', async run(m, a) {
   if (!has(m.member, PermissionFlagsBits.MoveMembers)) return m.reply({ embeds: [errE('❌ No permission.')] });
   const t = await resolveMember(m, a[0]); const ch = m.mentions.channels.first();
   if (!t || !ch) return m.reply({ embeds: [errE('Usage: move @user #voice')] });
   await t.voice.setChannel(ch).catch(e => m.reply({ embeds: [errE('Failed', e.message)] }));
-  m.reply({ embeds: [okE('➡️ Moved')] });
+  m.reply({ embeds: [okE('➡️')] });
 }};
-commands.afk = { cat: 'Members', desc: 'Set AFK', usage: 'afk [reason]', async run(m, a) {
+commands.afk = { cat: 'Members', desc: 'AFK', usage: 'afk [reason]', async run(m, a) {
   afks.set(m.author.id, a.join(' ') || 'AFK');
-  m.reply({ embeds: [okE('💤 AFK', afks.get(m.author.id))] });
+  m.reply({ embeds: [okE('💤', afks.get(m.author.id))] });
 }};
 commands.afklist = { cat: 'Members', desc: 'AFK list', async run(m) {
   if (!afks.size) return m.reply({ embeds: [infoE('No one AFK.')] });
-  m.reply({ embeds: [infoE('💤 AFK List').setDescription([...afks.entries()].map(([id, r]) => `<@${id}> — ${r}`).join('\n'))] });
+  m.reply({ embeds: [infoE('💤').setDescription([...afks.entries()].map(([id, r]) => `<@${id}> — ${r}`).join('\n'))] });
 }};
 commands.whois = commands.userinfo;
 
@@ -518,13 +525,13 @@ commands.logs = { cat: 'Security', desc: 'Log config', async run(m) {
     { name: 'Ban', value: BAN_LOG_CHANNEL_ID ? `<#${BAN_LOG_CHANNEL_ID}>` : 'Not set' },
     { name: 'Kick', value: KICK_LOG_CHANNEL_ID ? `<#${KICK_LOG_CHANNEL_ID}>` : 'Not set' })] });
 }};
-commands.setlogs = { cat: 'Security', desc: 'Set logs channel', usage: 'setlogs #ch', async run(m, a) {
+commands.setlogs = { cat: 'Security', desc: 'Set logs', usage: 'setlogs #ch', async run(m, a) {
   if (!has(m.member, PermissionFlagsBits.Administrator)) return m.reply({ embeds: [errE('❌ Admin.')] });
   const ch = m.mentions.channels.first(); if (!ch) return m.reply({ embeds: [errE('Mention.')] });
   settings.logs = ch.id;
-  m.reply({ embeds: [okE('✅ Set', `${ch}`)] });
+  m.reply({ embeds: [okE('✅', `${ch}`)] });
 }};
-commands.audit = { cat: 'Security', desc: 'Recent audit', async run(m) {
+commands.audit = { cat: 'Security', desc: 'Audit', async run(m) {
   if (!has(m.member, PermissionFlagsBits.ViewAuditLog)) return m.reply({ embeds: [errE('❌ No permission.')] });
   const logs = await m.guild.fetchAuditLogs({ limit: 10 }).catch(()=>null);
   if (!logs) return m.reply({ embeds: [errE('Failed.')] });
@@ -541,7 +548,7 @@ commands.antiinvite = toggle('antiinvite', 'Anti-invite');
 commands.antiraid = toggle('antiraid', 'Anti-raid');
 commands.antimention = toggle('antimention', 'Anti-mention');
 commands.automod = toggle('automod', 'Automod');
-commands.security = { cat: 'Security', desc: 'Security status', async run(m) {
+commands.security = { cat: 'Security', desc: 'Security', async run(m) {
   m.reply({ embeds: [infoE('🛡️ Security').addFields(
     { name: 'Anti-spam', value: settings.antispam ? '✅' : '❌', inline: true },
     { name: 'Anti-invite', value: settings.antiinvite ? '✅' : '❌', inline: true },
@@ -573,8 +580,8 @@ commands.botinfo = { cat: 'Utility', desc: 'Bot info', async run(m) {
     { name: 'Tag', value: client.user.tag, inline: true }, { name: 'Guilds', value: `${client.guilds.cache.size}`, inline: true },
     { name: 'Uptime', value: fmtDur(client.uptime), inline: true }, { name: 'Node', value: process.version, inline: true })] });
 }};
-commands.invite = { cat: 'Utility', desc: 'Invite link', async run(m) {
-  m.reply({ embeds: [infoE('🔗 Invite', `https://discord.com/api/oauth2/authorize?client_id=${client.user.id}&permissions=8&scope=bot%20applications.commands`)] });
+commands.invite = { cat: 'Utility', desc: 'Invite', async run(m) {
+  m.reply({ embeds: [infoE('🔗', `https://discord.com/api/oauth2/authorize?client_id=${client.user.id}&permissions=8&scope=bot%20applications.commands`)] });
 }};
 commands.poll = { cat: 'Utility', desc: 'Poll', usage: 'poll Q? | a | b', async run(m, a) {
   const [q, ...opts] = a.join(' ').split('|').map(s => s.trim());
@@ -603,7 +610,7 @@ commands.msg = { cat: 'Utility', desc: 'Auto message', usage: 'msg create <name>
   await m.reply({ embeds: [infoE('📍 Where?', '`channel` / `#mention` / `dm`')] });
   let w; try { const c = await m.channel.awaitMessages({ filter: f, max: 1, time: 60000, errors: ['time'] }); w = c.first(); } catch { return m.reply({ embeds: [errE('Timed out.')] }); }
   const t = w.content.trim();
-  if (t === 'channel') { await m.channel.send(content); return m.reply({ embeds: [okE('✅ Sent')] }); }
+  if (t === 'channel') { await m.channel.send(content); return m.reply({ embeds: [okE('✅')] }); }
   if (t === 'dm') {
     await m.reply({ embeds: [infoE('👥 Who?', '`all` / `humans` / `bots` / mention')] });
     let tg; try { const c = await m.channel.awaitMessages({ filter: f, max: 1, time: 60000, errors: ['time'] }); tg = c.first(); } catch { return m.reply({ embeds: [errE('Timed out.')] }); }
@@ -619,10 +626,10 @@ commands.msg = { cat: 'Utility', desc: 'Auto message', usage: 'msg create <name>
     if (!r || !r.size) return m.reply({ embeds: [errE('Cancelled.')] });
     let ok = 0, fail = 0;
     for (const mem of list) { try { await mem.send(content); ok++; } catch { fail++; } await new Promise(r => setTimeout(r, 1200)); }
-    return m.reply({ embeds: [okE('✅ Done', `✅ ${ok} • ❌ ${fail}`)] });
+    return m.reply({ embeds: [okE('✅', `✅ ${ok} • ❌ ${fail}`)] });
   }
   const ch = m.mentions.channels.first();
-  if (ch) { await ch.send(content); return m.reply({ embeds: [okE('✅ Sent', `${ch}`)] }); }
+  if (ch) { await ch.send(content); return m.reply({ embeds: [okE('✅', `${ch}`)] }); }
   m.reply({ embeds: [errE('Unknown target.')] });
 }};
 commands.announce = { cat: 'Utility', desc: 'Announce', usage: 'announce <text>', async run(m, a) {
@@ -633,7 +640,7 @@ commands.announce = { cat: 'Utility', desc: 'Announce', usage: 'announce <text>'
 commands.remind = { cat: 'Utility', desc: 'Remind', usage: 'remind 10m text', async run(m, a) {
   const d = parseDur(a[0]); if (!d) return m.reply({ embeds: [errE('Usage: remind 10m text')] });
   const t = a.slice(1).join(' ') || 'Reminder!';
-  m.reply({ embeds: [okE('⏰ Set', fmtDur(d))] });
+  m.reply({ embeds: [okE('⏰', fmtDur(d))] });
   setTimeout(() => m.author.send({ embeds: [infoE('⏰', `${t}\nFrom ${m.guild.name}`)] }).catch(()=>{}), d);
 }};
 commands.translate = { cat: 'Utility', desc: 'Translate', usage: 'translate <lang> <text>', async run(m, a) {
@@ -644,7 +651,7 @@ commands.translate = { cat: 'Utility', desc: 'Translate', usage: 'translate <lan
     m.reply({ embeds: [infoE('🌐').addFields({ name: 'In', value: a.slice(1).join(' ') }, { name: 'Out', value: data[0].map(x => x[0]).join('') })] });
   } catch { m.reply({ embeds: [errE('Failed.')] }); }
 }};
-commands.calculate = { cat: 'Utility', desc: 'Calculate', usage: 'calculate 2+2', async run(m, a) {
+commands.calculate = { cat: 'Utility', desc: 'Calc', usage: 'calculate 2+2', async run(m, a) {
   const e = a.join(' ').replace(/[^0-9+\-*/(). %]/g, '');
   if (!e) return m.reply({ embeds: [errE('Usage: calculate 2+2')] });
   try { m.reply({ embeds: [okE('🧮', `\`${e}\` = **${Function(`"use strict"; return (${e});`)()}**`)] }); } catch { m.reply({ embeds: [errE('Invalid.')] }); }
@@ -653,8 +660,8 @@ commands.choose = { cat: 'Utility', desc: 'Choose', usage: 'choose a b c', async
   if (a.length < 2) return m.reply({ embeds: [errE('At least 2.')] });
   m.reply({ embeds: [okE('🎲', a[Math.floor(Math.random()*a.length)])] });
 }};
-commands.coinflip = { cat: 'Utility', desc: 'Coin flip', async run(m) { m.reply({ embeds: [okE('🪙', Math.random() < 0.5 ? 'Heads' : 'Tails')] }); }};
-commands.roll = { cat: 'Utility', desc: 'Roll dice', usage: 'roll [NdN]', async run(m, a) {
+commands.coinflip = { cat: 'Utility', desc: 'Coin', async run(m) { m.reply({ embeds: [okE('🪙', Math.random() < 0.5 ? 'Heads' : 'Tails')] }); }};
+commands.roll = { cat: 'Utility', desc: 'Roll', usage: 'roll [NdN]', async run(m, a) {
   const r = a[0] && a[0].match(/^(\d+)d(\d+)$/i);
   if (r) { const n = parseInt(r[1]), s = parseInt(r[2]); let tot = 0, rs = []; for (let i = 0; i < Math.min(n, 20); i++) { const v = Math.ceil(Math.random()*s); rs.push(v); tot += v; } return m.reply({ embeds: [okE('🎲', `${rs.join(', ')}\nTotal: **${tot}**`)] }); }
   m.reply({ embeds: [okE('🎲', `**${Math.ceil(Math.random()*100)}**`)] });
@@ -676,26 +683,26 @@ commands.report = { cat: 'Utility', desc: 'Report', usage: 'report <@user> <reas
   if (!t || !r) return m.reply({ embeds: [errE('Usage: report @user reason')] });
   const ch = settings.logs ? m.guild.channels.cache.get(settings.logs) : null;
   if (ch) ch.send({ embeds: [errE('🚨 Report').addFields({ name: 'Reported', value: `${t.tag}` }, { name: 'By', value: m.author.tag }, { name: 'Reason', value: r })] });
-  m.reply({ embeds: [okE('✅ Reported')] });
+  m.reply({ embeds: [okE('✅')] });
 }};
-commands.servericon = { cat: 'Utility', desc: 'Server icon', async run(m) {
+commands.servericon = { cat: 'Utility', desc: 'Icon', async run(m) {
   if (!m.guild.iconURL()) return m.reply({ embeds: [errE('No icon.')] });
   m.reply({ embeds: [infoE('🖼️').setImage(m.guild.iconURL({ size: 1024 }))] });
 }};
 
 /* ---------- CHANNELS ---------- */
-commands.createchannel = { cat: 'Channels', desc: 'Create channel', usage: 'createchannel <name>', async run(m, a) {
+commands.createchannel = { cat: 'Channels', desc: 'Create', usage: 'createchannel <name>', async run(m, a) {
   if (!has(m.member, PermissionFlagsBits.ManageChannels)) return m.reply({ embeds: [errE('❌ No permission.')] });
   const name = a.join('-').toLowerCase(); if (!name) return m.reply({ embeds: [errE('Provide a name.')] });
   const ch = await m.guild.channels.create({ name, type: ChannelType.GuildText }).catch(()=>null);
   if (ch) m.reply({ embeds: [okE('✅', ch.toString())] });
 }};
-commands.deletechannel = { cat: 'Channels', desc: 'Delete channel', async run(m) {
+commands.deletechannel = { cat: 'Channels', desc: 'Delete', async run(m) {
   if (!has(m.member, PermissionFlagsBits.ManageChannels)) return m.reply({ embeds: [errE('❌ No permission.')] });
   const ch = m.mentions.channels.first() || m.channel;
   await ch.delete().catch(()=>{});
 }};
-commands.renamechannel = { cat: 'Channels', desc: 'Rename channel', usage: 'renamechannel [#ch] name', async run(m, a) {
+commands.renamechannel = { cat: 'Channels', desc: 'Rename', usage: 'renamechannel [#ch] name', async run(m, a) {
   if (!has(m.member, PermissionFlagsBits.ManageChannels)) return m.reply({ embeds: [errE('❌ No permission.')] });
   const ch = m.mentions.channels.first() || m.channel;
   const name = a.filter(x => !x.startsWith('<#')).join('-').toLowerCase();
@@ -703,12 +710,12 @@ commands.renamechannel = { cat: 'Channels', desc: 'Rename channel', usage: 'rena
   await ch.setName(name).catch(()=>{});
   m.reply({ embeds: [okE('✏️', ch.toString())] });
 }};
-commands.topic = { cat: 'Channels', desc: 'Set topic', usage: 'topic <text>', async run(m, a) {
+commands.topic = { cat: 'Channels', desc: 'Topic', usage: 'topic <text>', async run(m, a) {
   if (!has(m.member, PermissionFlagsBits.ManageChannels)) return m.reply({ embeds: [errE('❌ No permission.')] });
   await m.channel.setTopic(a.join(' ').slice(0, 1024)).catch(()=>{});
   m.reply({ embeds: [okE('📝')] });
 }};
-commands.hide = { cat: 'Channels', desc: 'Hide channel', async run(m) {
+commands.hide = { cat: 'Channels', desc: 'Hide', async run(m) {
   if (!has(m.member, PermissionFlagsBits.ManageChannels)) return m.reply({ embeds: [errE('❌ No permission.')] });
   await m.channel.permissionOverwrites.edit(m.guild.roles.everyone, { ViewChannel: false }).catch(()=>{});
   m.reply({ embeds: [okE('🙈')] });
@@ -718,20 +725,20 @@ commands.unhide = { cat: 'Channels', desc: 'Unhide', async run(m) {
   await m.channel.permissionOverwrites.edit(m.guild.roles.everyone, { ViewChannel: null }).catch(()=>{});
   m.reply({ embeds: [okE('👁️')] });
 }};
-commands.clonechannel = { cat: 'Channels', desc: 'Clone channel', async run(m) {
+commands.clonechannel = { cat: 'Channels', desc: 'Clone', async run(m) {
   if (!has(m.member, PermissionFlagsBits.ManageChannels)) return m.reply({ embeds: [errE('❌ No permission.')] });
   const ch = m.mentions.channels.first() || m.channel;
   const c = await ch.clone().catch(()=>null);
   if (c) m.reply({ embeds: [okE('✅', c.toString())] });
 }};
-commands.channelinfo = { cat: 'Channels', desc: 'Channel info', async run(m) {
+commands.channelinfo = { cat: 'Channels', desc: 'Info', async run(m) {
   const ch = m.mentions.channels.first() || m.channel;
   m.reply({ embeds: [infoE(`📁 #${ch.name}`).addFields({ name: 'ID', value: ch.id, inline: true }, { name: 'Type', value: `${ch.type}`, inline: true }, { name: 'Created', value: `<t:${Math.floor(ch.createdTimestamp/1000)}:R>`, inline: true })] });
 }};
-commands.listchannels = { cat: 'Channels', desc: 'List channels', async run(m) {
+commands.listchannels = { cat: 'Channels', desc: 'List', async run(m) {
   m.reply({ embeds: [infoE('📋').setDescription(m.guild.channels.cache.map(c => `${c.type === ChannelType.GuildVoice ? '🔊' : '#'} ${c.name}`).join('\n').slice(0, 4000) || 'None')] });
 }};
-commands.nuke = { cat: 'Channels', desc: 'Nuke channel', async run(m) {
+commands.nuke = { cat: 'Channels', desc: 'Nuke', async run(m) {
   if (!has(m.member, PermissionFlagsBits.ManageChannels)) return m.reply({ embeds: [errE('❌ No permission.')] });
   const pos = m.channel.position;
   const clone = await m.channel.clone().catch(()=>null);
@@ -760,7 +767,7 @@ commands.rank = { cat: 'Fun', desc: 'Rank', async run(m) {
   const e = eco(m.author.id);
   m.reply({ embeds: [infoE(`⭐ ${m.author.username}`).addFields({ name: 'Level', value: `${Math.floor(Math.sqrt(e.msgs/5))}`, inline: true }, { name: 'XP', value: `${e.msgs}`, inline: true })] });
 }};
-commands.rep = { cat: 'Fun', desc: 'Give rep', usage: 'rep @user', async run(m, a) {
+commands.rep = { cat: 'Fun', desc: 'Rep', usage: 'rep @user', async run(m, a) {
   const t = await resolveUser(m, a[0]); if (!t) return m.reply({ embeds: [errE('Mention.')] });
   if (t.id === m.author.id) return m.reply({ embeds: [errE('No self rep.')] });
   eco(t.id).rep++;
@@ -802,7 +809,7 @@ commands.giveaway = { cat: 'Fun', desc: 'Giveaway', usage: 'giveaway 1m Prize', 
 
 /* ---------- SMP ---------- */
 commands.ip = { cat: 'SMP', desc: 'IP', async run(m) { m.reply({ embeds: [infoE('🖥️', `\`\`\`${MC_SERVER_IP}\`\`\``)] }); }};
-commands.serverstatus = { cat: 'SMP', desc: 'MC status', async run(m) {
+commands.serverstatus = { cat: 'SMP', desc: 'Status', async run(m) {
   try {
     const r = await fetch(`https://api.mcsrvstat.us/3/${MC_SERVER_IP}`).then(x => x.json());
     if (!r.online) return m.reply({ embeds: [errE('Offline.')] });
@@ -811,7 +818,7 @@ commands.serverstatus = { cat: 'SMP', desc: 'MC status', async run(m) {
 }};
 commands.rules = { cat: 'SMP', desc: 'Rules', async run(m) { m.reply({ embeds: [infoE('📜 Rules', '1. احترم الجميع.\n2. ممنوع Hacks.\n3. ممنوع Griefing.\n4. لا سبام.\n5. التزم بالـ Staff.')] }); }};
 commands.store = { cat: 'SMP', desc: 'Store', async run(m) { m.reply({ embeds: [infoE('🛒', MC_STORE_URL)] }); }};
-commands.apply = { cat: 'SMP', desc: 'Apply', async run(m) { m.reply({ embeds: [infoE('📝', 'Applications channel or DM staff.')] }); }};
+commands.apply = { cat: 'SMP', desc: 'Apply', async run(m) { m.reply({ embeds: [infoE('📝', 'See the applications panel.')] }); }};
 commands.whitelist = { cat: 'SMP', desc: 'Whitelist', usage: 'whitelist <MCname>', async run(m, a) {
   if (!a[0]) return m.reply({ embeds: [errE('Provide MC username.')] });
   const ch = settings.logs ? m.guild.channels.cache.get(settings.logs) : null;
@@ -852,17 +859,17 @@ commands.addvoice = { cat: 'Voice', desc: 'Join voice 24/7', usage: 'addvoice <v
   const ch = m.guild.channels.cache.get(id) || await m.guild.channels.fetch(id).catch(()=>null);
   if (!ch) return m.reply({ embeds: [errE('❌ Not found.')] });
   if (ch.type !== ChannelType.GuildVoice && ch.type !== ChannelType.GuildStageVoice) return m.reply({ embeds: [errE('❌ Not voice.')] });
-  try { await connectToVoice(m.guild, ch.id); voiceConfig[m.guild.id] = ch.id; saveVoiceConfig(voiceConfig); m.reply({ embeds: [okE('🔊 Connected', `${ch}`)] }); }
+  try { await connectToVoice(m.guild, ch.id); voiceConfig[m.guild.id] = ch.id; saveVoiceConfig(voiceConfig); m.reply({ embeds: [okE('🔊', `${ch}`)] }); }
   catch (e) { m.reply({ embeds: [errE('❌ Failed', e.message)] }); }
 }};
-commands.removevoice = { cat: 'Voice', desc: 'Disconnect voice', async run(m) {
+commands.removevoice = { cat: 'Voice', desc: 'Disconnect', async run(m) {
   if (!has(m.member, PermissionFlagsBits.Administrator)) return m.reply({ embeds: [errE('❌ Admin only.')] });
   const conn = getVoiceConnection(m.guild.id);
   if (conn) { try { conn.destroy(); } catch {} }
   if (reconnectTimers.has(m.guild.id)) { clearTimeout(reconnectTimers.get(m.guild.id)); reconnectTimers.delete(m.guild.id); }
   const had = !!voiceConfig[m.guild.id];
   delete voiceConfig[m.guild.id]; saveVoiceConfig(voiceConfig);
-  m.reply({ embeds: [okE('🔇 Disconnected', had ? 'Removed.' : 'Was not saved.')] });
+  m.reply({ embeds: [okE('🔇', had ? 'Removed.' : 'Was not saved.')] });
 }};
 
 /* ============================================================
@@ -874,15 +881,15 @@ client.once('ready', async () => {
   console.log(`[READY] Guilds: ${client.guilds.cache.size}`);
   console.log(`[READY] Welcome Channel: ${WELCOME_CHANNEL_ID}`);
   console.log(`[READY] Verify Channel: ${VERIFY_CHANNEL_ID}`);
+  console.log(`[READY] Apply Panel Channel: ${APPLY_STAFF_CHANNEL_ID}`);
+  console.log(`[READY] Apply Results Channel: ${APPLY_RESULTS_CHANNEL_ID}`);
   for (const [, guild] of client.guilds.cache) {
     const ch = guild.channels.cache.get(WELCOME_CHANNEL_ID);
     if (ch) {
       console.log(`[READY] ✅ Welcome #${ch.name}`);
       console.log(`[READY] Cached members: ${guild.members.cache.size}/${guild.memberCount}`);
       if (guild.members.cache.size <= 1) console.warn('[READY] ⚠️ SERVER MEMBERS INTENT may be OFF!');
-    } else {
-      console.warn(`[READY] ❌ Welcome channel ${WELCOME_CHANNEL_ID} not found`);
-    }
+    } else console.warn(`[READY] ❌ Welcome channel ${WELCOME_CHANNEL_ID} not found`);
   }
   console.log('==============================');
   client.user.setActivity('𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷', { type: ActivityType.Watching });
@@ -894,71 +901,206 @@ client.once('ready', async () => {
  * ============================================================ */
 client.on('guildMemberAdd', async member => {
   console.log(`[WELCOME] ➕ ${member.user.tag} (${member.id})`);
-
-  // 1) Give unverified role
   if (UNVERIFIED_ROLE_ID) {
-    try {
-      await member.roles.add(UNVERIFIED_ROLE_ID, 'Auto role on join');
-      console.log(`[WELCOME] ✅ Unverified role given`);
-    } catch (e) {
-      console.error(`[WELCOME] ❌ Failed unverified role:`, e.message);
-    }
+    try { await member.roles.add(UNVERIFIED_ROLE_ID, 'Auto role on join'); }
+    catch (e) { console.error(`[WELCOME] ❌ unverified role:`, e.message); }
   }
-
-  // 2) Anti-raid
   joinLog.push(Date.now());
   while (joinLog.length && Date.now() - joinLog[0] > 10000) joinLog.shift();
   if (settings.antiraid && joinLog.length >= 8) {
     try { await member.kick('Anti-raid'); } catch {}
     return;
   }
-
-  // 3) Welcome message
   await sendWelcome(member.guild, member);
 });
 
 /* ============================================================
- *             EVENT: INTERACTION (Verify button)
+ *             EVENT: INTERACTION (Verify + Apply + Accept/Reject)
  * ============================================================ */
 client.on(Events.InteractionCreate, async interaction => {
-  if (!interaction.isButton()) return;
-  if (interaction.customId !== 'verify_button') return;
 
-  try {
-    const guild = interaction.guild;
-    const member = await guild.members.fetch(interaction.user.id);
+  /* ============ BUTTONS ============ */
+  if (interaction.isButton()) {
+    const id = interaction.customId;
 
-    if (member.roles.cache.has(VERIFIED_ROLE_ID)) {
-      return interaction.reply({
-        embeds: [infoE('ℹ️ Already Verified', 'راك ديجا verified!')],
-        ephemeral: true
-      });
+    /* --- Verify button --- */
+    if (id === 'verify_button') {
+      try {
+        const guild = interaction.guild;
+        const member = await guild.members.fetch(interaction.user.id);
+        if (member.roles.cache.has(VERIFIED_ROLE_ID)) {
+          return interaction.reply({ embeds: [infoE('ℹ️ Already Verified', 'راك ديجا verified!')], ephemeral: true });
+        }
+        await member.roles.add(VERIFIED_ROLE_ID, 'Verified via button');
+        if (UNVERIFIED_ROLE_ID && member.roles.cache.has(UNVERIFIED_ROLE_ID))
+          await member.roles.remove(UNVERIFIED_ROLE_ID, 'Verified').catch(()=>{});
+        await interaction.reply({ embeds: [okE('✅ Verified!', `مرحبا بيك فـ **𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷**! دابا عندك access لجميع الرومات.`)], ephemeral: true });
+        if (GENERAL_LOG_CHANNEL_ID) sendLog(guild, GENERAL_LOG_CHANNEL_ID,
+          okE('✅ Member Verified').addFields({ name: 'User', value: `${member.user.tag} (${member.id})` }, { name: 'Role', value: `<@&${VERIFIED_ROLE_ID}>` }));
+      } catch (e) {
+        console.error('[VERIFY] ❌', e);
+        if (!interaction.replied && !interaction.deferred)
+          interaction.reply({ embeds: [errE('❌ Error', e.message)], ephemeral: true }).catch(()=>{});
+      }
+      return;
     }
 
-    await member.roles.add(VERIFIED_ROLE_ID, 'Verified via button');
-
-    if (UNVERIFIED_ROLE_ID && member.roles.cache.has(UNVERIFIED_ROLE_ID)) {
-      await member.roles.remove(UNVERIFIED_ROLE_ID, 'Verified').catch(()=>{});
+    /* --- Apply: Minecraft --- */
+    if (id === 'apply_minecraft') {
+      const modal = new ModalBuilder().setCustomId('modal_apply_minecraft').setTitle('Apply Staff Minecraft');
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder().setCustomId('q_level').setLabel('شنو مستواك في اللعبة؟').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(200).setPlaceholder('مثال: متوسط / محترف / ...')
+        ),
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder().setCustomId('q_age').setLabel('شحال عمرك فالحقيقة؟').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(50).setPlaceholder('مثال: 16')
+        ),
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder().setCustomId('q_exp').setLabel('شنو هي خبرتك؟').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(1000)
+        ),
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder().setCustomId('q_prev').setLabel('واش كنتي staff فسيرفر آخر؟').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(200).setPlaceholder('لا / نعم - اسم السيرفر')
+        )
+      );
+      return interaction.showModal(modal).catch(e => console.error('[MODAL]', e));
     }
 
-    console.log(`[VERIFY] ✅ ${member.user.tag} verified.`);
-
-    await interaction.reply({
-      embeds: [okE('✅ Verified!', `مرحبا بيك فـ **𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷**! دابا عندك access لجميع الرومات.\nWelcome! You now have access to all channels.`)],
-      ephemeral: true
-    });
-
-    if (GENERAL_LOG_CHANNEL_ID) {
-      sendLog(guild, GENERAL_LOG_CHANNEL_ID,
-        okE('✅ Member Verified').addFields(
-          { name: 'User', value: `${member.user.tag} (${member.id})` },
-          { name: 'Role', value: `<@&${VERIFIED_ROLE_ID}>` }
-        ));
+    /* --- Apply: Discord --- */
+    if (id === 'apply_discord') {
+      const modal = new ModalBuilder().setCustomId('modal_apply_discord').setTitle('Apply Staff Discord');
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder().setCustomId('q_why').setLabel('علاش بغيتي تكون staff فالديسكورد؟').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(1000)
+        ),
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder().setCustomId('q_age').setLabel('شحال عمرك فالحقيقة؟').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(50)
+        ),
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder().setCustomId('q_exp').setLabel('شنو هي خبرتك فالديسكورد؟').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(1000)
+        ),
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder().setCustomId('q_prev').setLabel('واش كنتي staff فسيرفر آخر؟').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(200)
+        )
+      );
+      return interaction.showModal(modal).catch(e => console.error('[MODAL]', e));
     }
-  } catch (e) {
-    console.error('[VERIFY] ❌', e);
-    if (!interaction.replied && !interaction.deferred) {
-      interaction.reply({ embeds: [errE('❌ Error', e.message)], ephemeral: true }).catch(()=>{});
+
+    /* --- Accept application --- */
+    if (id.startsWith('apply_accept_')) {
+      if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator) && !interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+        return interaction.reply({ embeds: [errE('❌ Admin only.')], ephemeral: true });
+      }
+      const userId = id.replace('apply_accept_', '');
+      try {
+        const user = await client.users.fetch(userId).catch(()=>null);
+        const data = applications.get(interaction.message.id);
+
+        if (user) {
+          await user.send({ embeds: [okE('🎉 Congratulations!', `**تم قبولك فـ Staff 𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷!**\n\nYour application has been **accepted**. A staff member will contact you soon.\n\nWelcome to the team! 🎊`)] }).catch(e => console.warn('[DM] Cannot DM user:', e.message));
+        }
+
+        const e = okE('✅ Application Accepted').addFields(
+          { name: 'Applicant', value: `<@${userId}> (${userId})` },
+          { name: 'Type', value: data?.type || 'Unknown' },
+          { name: 'Reviewed by', value: `${interaction.user.tag}` }
+        );
+        await interaction.reply({ embeds: [e] });
+        try { await interaction.message.edit({ components: [] }); } catch {}
+      } catch (e) {
+        console.error('[ACCEPT] ❌', e);
+        if (!interaction.replied && !interaction.deferred)
+          interaction.reply({ embeds: [errE('❌ Error', e.message)], ephemeral: true }).catch(()=>{});
+      }
+      return;
+    }
+
+    /* --- Reject application --- */
+    if (id.startsWith('apply_reject_')) {
+      if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator) && !interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+        return interaction.reply({ embeds: [errE('❌ Admin only.')], ephemeral: true });
+      }
+      const userId = id.replace('apply_reject_', '');
+      try {
+        const user = await client.users.fetch(userId).catch(()=>null);
+        if (user) {
+          await user.send({ embeds: [errE('❌ Application Result', `**للأسف، تم رفض طلبك.**\n\nYour application has been **rejected**. You can apply again later.\n\nبالتوفيق فالمستقبل! 💪`)] }).catch(e => console.warn('[DM]', e.message));
+        }
+        const e = errE('❌ Application Rejected').addFields(
+          { name: 'Applicant', value: `<@${userId}> (${userId})` },
+          { name: 'Reviewed by', value: `${interaction.user.tag}` }
+        );
+        await interaction.reply({ embeds: [e] });
+        try { await interaction.message.edit({ components: [] }); } catch {}
+      } catch (e) {
+        console.error('[REJECT] ❌', e);
+        if (!interaction.replied && !interaction.deferred)
+          interaction.reply({ embeds: [errE('❌ Error', e.message)], ephemeral: true }).catch(()=>{});
+      }
+      return;
+    }
+  }
+
+  /* ============ MODALS ============ */
+  if (interaction.isModalSubmit()) {
+    const id = interaction.customId;
+
+    if (id === 'modal_apply_minecraft' || id === 'modal_apply_discord') {
+      try {
+        const isMc = id === 'modal_apply_minecraft';
+        const type = isMc ? 'Minecraft Staff' : 'Discord Staff';
+
+        const answers = isMc
+          ? {
+              'Level in game': interaction.fields.getTextInputValue('q_level'),
+              'Age': interaction.fields.getTextInputValue('q_age'),
+              'Experience': interaction.fields.getTextInputValue('q_exp'),
+              'Previous staff': interaction.fields.getTextInputValue('q_prev')
+            }
+          : {
+              'Why staff?': interaction.fields.getTextInputValue('q_why'),
+              'Age': interaction.fields.getTextInputValue('q_age'),
+              'Discord experience': interaction.fields.getTextInputValue('q_exp'),
+              'Previous staff': interaction.fields.getTextInputValue('q_prev')
+            };
+
+        await interaction.reply({ embeds: [okE('✅ Application Sent!', 'تم إرسال طلبك بنجاح. غادي يتشاف من طرف الـ Staff.')], ephemeral: true });
+
+        const resultsCh = interaction.guild.channels.cache.get(APPLY_RESULTS_CHANNEL_ID)
+                       || await interaction.guild.channels.fetch(APPLY_RESULTS_CHANNEL_ID).catch(()=>null);
+
+        if (!resultsCh || !resultsCh.isTextBased()) {
+          console.error('[APPLY] ❌ Results channel not found');
+          return;
+        }
+
+        const embed = new EmbedBuilder()
+          .setColor(isMc ? C.ok : C.info)
+          .setTitle(`📝 New Application — ${type}`)
+          .setDescription(`**Applicant:** <@${interaction.user.id}> (\`${interaction.user.id}\`)\n**Username:** \`${interaction.user.tag}\``)
+          .setThumbnail(interaction.user.displayAvatarURL({ size: 256 }))
+          .setFooter({ text: 'Use buttons below to Accept or Reject' })
+          .setTimestamp();
+
+        for (const [k, v] of Object.entries(answers)) {
+          embed.addFields({ name: k, value: `\`\`\`${String(v).slice(0, 1000) || '(empty)'}\`\`\`` });
+        }
+
+        const row = new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId(`apply_accept_${interaction.user.id}`).setLabel('Accept').setEmoji('✅').setStyle(ButtonStyle.Success),
+          new ButtonBuilder().setCustomId(`apply_reject_${interaction.user.id}`).setLabel('Reject').setEmoji('❌').setStyle(ButtonStyle.Danger)
+        );
+
+        const msg = await resultsCh.send({ content: `<@&${VERIFIED_ROLE_ID}>`, embeds: [embed], components: [row] }).catch(e => { console.error('[APPLY] send failed:', e.message); return null; });
+        if (msg) {
+          applications.set(msg.id, { userId: interaction.user.id, type, answers });
+          console.log(`[APPLY] ✅ Application from ${interaction.user.tag} (${type}) sent.`);
+        }
+      } catch (e) {
+        console.error('[MODAL] ❌', e);
+        if (!interaction.replied && !interaction.deferred)
+          interaction.reply({ embeds: [errE('❌ Error', e.message)], ephemeral: true }).catch(()=>{});
+      }
+      return;
     }
   }
 });
