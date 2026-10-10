@@ -11,7 +11,7 @@ const {
     REVIEWER_ROLE_ID,
     ACCEPTED_ROLE_ID,
     BANNER_URL = "https://media.discordapp.net/attachments/1480969775344652470/1496647110525845625/DF7E4FDA-66D3-49FF-BD5E-7C746253AE2D.png",
-    VERIFY_BANNER_URL,  // NEW: image for verify panel
+    VERIFY_BANNER_URL,
     TICKET_CATEGORY_ID,
     TICKET_LOG_CHANNEL_ID,
     TRANSCRIPT_CHANNEL_ID,
@@ -40,27 +40,23 @@ const client = new Client({
 });
 
 // ============================================
-// CONFIGURATION - NEW CHANNELS AND ROLE
+// CONFIGURATION
 // ============================================
 const TICKET_PANEL_CHANNEL_ID_NEW = "1511854009139331255";
 const TICKET_PANEL_CHANNEL_ID_NORMAL = "1511873447641223381";
 const TICKET_LOG_CHANNEL_ID_NEW = "1511854023127339088";
 const SUPPORT_ROLE_ID = "1511853901937119322";
 
-// ============================================
-// NEW: VERIFICATION SYSTEM CONFIG
-// ============================================
-const VERIFY_CHANNEL_ID = "1558503393226530947";       // Verify panel channel
-const UNVERIFIED_ROLE_ID = "1557761141575262298";       // Role given on join
-const VERIFIED_ROLE_ID = "1557761111242051704";         // Role given after clicking Verify
+// VERIFICATION SYSTEM
+const VERIFY_CHANNEL_ID = "1558503393226530947";
+const UNVERIFIED_ROLE_ID = "1557761141575262298";
+const VERIFIED_ROLE_ID = "1557761111242051704";
 
-// Ticket types for Minecraft Report panel
 const TICKET_TYPES = {
     help: { name: "Help", emoji: "🎫", color: "#38BDF8", desc: "Press to open a ticket for general assistance" },
     report: { name: "Report", emoji: "⚠️", color: "#EF4444", desc: "Press to open a ticket to report a player or bug" }
 };
 
-// Ticket types for Normal panel
 const NORMAL_TICKET_TYPES = {
     general: { name: "General Support", emoji: "📝", color: "#5865F2", desc: "General questions and assistance" },
     question: { name: "Question", emoji: "❓", color: "#FEE75C", desc: "Ask anything you want to know" },
@@ -69,34 +65,13 @@ const NORMAL_TICKET_TYPES = {
 };
 
 const APPLICATION_POSITIONS = {
-    staff: { 
-        name: "🛠 Staff Team", emoji: "🛠", color: "#5865F2", 
-        description: "Help moderate and manage the community",
-        roleId: "1508204459799613634"
-    },
-    wallpaper: { 
-        name: "🖼 Wallpaper Uploader", emoji: "🖼", color: "#9C27B0", 
-        description: "Submit high-quality PC and mobile wallpapers",
-        roleId: "1509922150138646680"
-    },
-    event: { 
-        name: "🎉 Event Hoster", emoji: "🎉", color: "#FEE75C", 
-        description: "Organize fun community events",
-        roleId: "1509922272323043461"
-    },
-    partnership: { 
-        name: "🤝 Partnership", emoji: "🤝", color: "#57F287", 
-        description: "Handle collaborations and partnerships",
-        roleId: null
-    },
-    developer: { 
-        name: "💻 Developer", emoji: "💻", color: "#17A2B8", 
-        description: "Work on bots and coding projects",
-        roleId: "1509921949717893201"
-    }
+    staff: { name: "🛠 Staff Team", emoji: "🛠", color: "#5865F2", description: "Help moderate and manage the community", roleId: "1508204459799613634" },
+    wallpaper: { name: "🖼 Wallpaper Uploader", emoji: "🖼", color: "#9C27B0", description: "Submit high-quality PC and mobile wallpapers", roleId: "1509922150138646680" },
+    event: { name: "🎉 Event Hoster", emoji: "🎉", color: "#FEE75C", description: "Organize fun community events", roleId: "1509922272323043461" },
+    partnership: { name: "🤝 Partnership", emoji: "🤝", color: "#57F287", description: "Handle collaborations and partnerships", roleId: null },
+    developer: { name: "💻 Developer", emoji: "💻", color: "#17A2B8", description: "Work on bots and coding projects", roleId: "1509921949717893201" }
 };
 
-// الأسئلة الجديدة ديال Staff Team
 const STANDARD_APPLICATION_QUESTIONS = [
     { id: "fullname", question: "📝 What's your name ?", example: "Example: John Doe" },
     { id: "age", question: "🎂 How old are you ?", example: "Example: 18" },
@@ -107,7 +82,6 @@ const STANDARD_APPLICATION_QUESTIONS = [
     { id: "device", question: "💻 Device :\nOption 1 : phone\nOption 2 : Computer\nOption 3 : Both/Bjouj bihom", example: "Example: Computer" }
 ];
 
-// أسئلة Wallpaper Uploader
 const WALLPAPER_APPLICATION_QUESTIONS = [
     { id: "type", question: "🖼 What type of wallpapers do you upload?", example: "Example: Gaming, Nature, Anime, Abstract, Minimalist, etc." },
     { id: "platform", question: "📱 PC or Mobile wallpapers? (Or both)", example: "Example: Both, PC (1920x1080), Mobile (1080x2340)" },
@@ -240,13 +214,13 @@ function getTicketAccessRoles() {
 
 function getTicketPermissionOverwrites() {
     const roleIds = getTicketAccessRoles();
-    return roleIds.map(roleId => ({ 
-        id: roleId, 
+    return roleIds.map(roleId => ({
+        id: roleId,
         allow: [
             PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages,
             PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.AttachFiles,
             PermissionFlagsBits.AddReactions, PermissionFlagsBits.UseExternalEmojis
-        ] 
+        ]
     }));
 }
 
@@ -266,7 +240,7 @@ async function safeChannelBulkDelete(channel, limit = 10) {
 }
 
 // ============================================
-// TICKET PANEL - MINECRAFT REPORT
+// TICKET PANEL - MINECRAFT
 // ============================================
 async function createMinecraftTicketPanel(channel) {
     await safeChannelBulkDelete(channel, 10);
@@ -322,13 +296,11 @@ async function createNormalTicketPanel(channel) {
 }
 
 // ============================================
-// NEW: VERIFY PANEL
+// VERIFY PANEL
 // ============================================
 async function createVerifyPanel(channel) {
     await safeChannelBulkDelete(channel, 10);
-    
     const imageToUse = VERIFY_BANNER_URL || BANNER_URL;
-    
     const embed = new EmbedBuilder()
         .setColor(0x2b2d31)
         .setTitle("Bonbon Utilities | ✅ Verification")
@@ -347,16 +319,9 @@ async function createVerifyPanel(channel) {
         .setImage(imageToUse)
         .setFooter({ text: "Verification System", iconURL: client.user.displayAvatarURL() })
         .setTimestamp();
-
-    const row = new ActionRowBuilder()
-        .addComponents(
-            new ButtonBuilder()
-                .setCustomId('verify_user')
-                .setLabel('Verify')
-                .setEmoji('✅')
-                .setStyle(ButtonStyle.Success)
-        );
-    
+    const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('verify_user').setLabel('Verify').setEmoji('✅').setStyle(ButtonStyle.Success)
+    );
     await channel.send({ embeds: [embed], components: [row] });
 }
 
@@ -427,7 +392,7 @@ async function startApplication(user, position) {
     };
     activeApplications.set(user.id, application);
     const isWallpaper = position === 'wallpaper';
-    const description = isWallpaper 
+    const description = isWallpaper
         ? `You are applying to become a **Wallpaper Uploader**.\n\nPlease answer **${questions.length} questions**.\n\nType \`cancel\` at any time to cancel.`
         : `I will ask you **${questions.length} questions**.\nPlease answer each honestly.\n\n**Type \`cancel\` at any time to cancel.**\n\nLet's begin! 🚀`;
     const welcomeEmbed = new EmbedBuilder()
@@ -575,7 +540,7 @@ client.once('ready', async () => {
 
     await fixChannelPermissions(TICKET_PANEL_CHANNEL_ID_NEW);
     await fixChannelPermissions(TICKET_PANEL_CHANNEL_ID_NORMAL);
-    await fixChannelPermissions(VERIFY_CHANNEL_ID);  // NEW
+    await fixChannelPermissions(VERIFY_CHANNEL_ID);
     if (APP_PANEL_CHANNEL_ID) await fixChannelPermissions(APP_PANEL_CHANNEL_ID);
 
     const minecraftPanelChannel = client.channels.cache.get(TICKET_PANEL_CHANNEL_ID_NEW);
@@ -584,14 +549,8 @@ client.once('ready', async () => {
     const normalPanelChannel = client.channels.cache.get(TICKET_PANEL_CHANNEL_ID_NORMAL);
     if (normalPanelChannel) { await createNormalTicketPanel(normalPanelChannel); console.log("✅ Normal Ticket panel deployed!"); }
 
-    // NEW: Create verify panel
     const verifyPanelChannel = client.channels.cache.get(VERIFY_CHANNEL_ID);
-    if (verifyPanelChannel) {
-        await createVerifyPanel(verifyPanelChannel);
-        console.log("✅ Verify panel deployed in channel: " + VERIFY_CHANNEL_ID);
-    } else {
-        console.log(`❌ Verify panel channel ${VERIFY_CHANNEL_ID} not found!`);
-    }
+    if (verifyPanelChannel) { await createVerifyPanel(verifyPanelChannel); console.log("✅ Verify panel deployed!"); }
 
     if (APP_PANEL_CHANNEL_ID) {
         const appPanelChannel = client.channels.cache.get(APP_PANEL_CHANNEL_ID);
@@ -602,21 +561,21 @@ client.once('ready', async () => {
 });
 
 // ============================================
-// TICKET SYSTEM - BUTTON HANDLER
+// INTERACTION HANDLER
 // ============================================
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isButton()) return;
-    
-    // Handle Minecraft ticket buttons
+
+    // MINECRAFT TICKET
     if (interaction.customId.startsWith('ticket_')) {
         const type = interaction.customId.replace('ticket_', '');
         const typeConfig = TICKET_TYPES[type];
         if (!typeConfig) return;
         for (const [id, data] of activeTickets) {
             if (data.userId === interaction.user.id) {
-                return interaction.reply({ 
-                    embeds: [new EmbedBuilder().setTitle("❌ TICKET LIMIT REACHED").setDescription(`> You already have an open ticket!\n**Channel:** <#${id}>`).setColor(0xEF4444)], 
-                    ephemeral: true 
+                return interaction.reply({
+                    embeds: [new EmbedBuilder().setTitle("❌ TICKET LIMIT REACHED").setDescription(`> You already have an open ticket!\n**Channel:** <#${id}>`).setColor(0xEF4444)],
+                    ephemeral: true
                 });
             }
         }
@@ -659,29 +618,29 @@ client.on('interactionCreate', async (interaction) => {
                 .setTitle("Bonbon Utilities | 🎫 TICKET OPENED")
                 .setDescription(`**User:** ${interaction.user.tag}\n**Type:** ${typeConfig.name}\n**Channel:** ${ticketChannel}`)
                 .setColor(0x22C55E).setTimestamp());
-            await interaction.editReply({ 
+            await interaction.editReply({
                 embeds: [new EmbedBuilder().setTitle("Bonbon Utilities | ✅ TICKET CREATED")
-                    .setDescription(`> Ticket created: ${ticketChannel}`).setColor(0x22C55E)], ephemeral: true 
+                    .setDescription(`> Ticket created: ${ticketChannel}`).setColor(0x22C55E)], ephemeral: true
             });
         } catch (err) {
             console.error(err);
-            await interaction.editReply({ 
+            await interaction.editReply({
                 embeds: [new EmbedBuilder().setTitle("Bonbon Utilities | ❌ ERROR")
-                    .setDescription("> Failed to create ticket.").setColor(0xEF4444)], ephemeral: true 
+                    .setDescription("> Failed to create ticket.").setColor(0xEF4444)], ephemeral: true
             });
         }
     }
-    
-    // Handle Normal ticket buttons
+
+    // NORMAL TICKET
     else if (interaction.customId.startsWith('normal_ticket_')) {
         const type = interaction.customId.replace('normal_ticket_', '');
         const typeConfig = NORMAL_TICKET_TYPES[type];
         if (!typeConfig) return;
         for (const [id, data] of activeTickets) {
             if (data.userId === interaction.user.id) {
-                return interaction.reply({ 
-                    embeds: [new EmbedBuilder().setTitle("❌ TICKET LIMIT REACHED").setDescription(`> You already have an open ticket!\n**Channel:** <#${id}>`).setColor(0xEF4444)], 
-                    ephemeral: true 
+                return interaction.reply({
+                    embeds: [new EmbedBuilder().setTitle("❌ TICKET LIMIT REACHED").setDescription(`> You already have an open ticket!\n**Channel:** <#${id}>`).setColor(0xEF4444)],
+                    ephemeral: true
                 });
             }
         }
@@ -724,26 +683,27 @@ client.on('interactionCreate', async (interaction) => {
                 .setTitle("Bonbon Utilities | 🎫 TICKET OPENED")
                 .setDescription(`**User:** ${interaction.user.tag}\n**Type:** ${typeConfig.name}\n**Channel:** ${ticketChannel}`)
                 .setColor(0x22C55E).setTimestamp());
-            await interaction.editReply({ 
+            await interaction.editReply({
                 embeds: [new EmbedBuilder().setTitle("Bonbon Utilities | ✅ TICKET CREATED")
-                    .setDescription(`> Ticket created: ${ticketChannel}`).setColor(0x22C55E)], ephemeral: true 
+                    .setDescription(`> Ticket created: ${ticketChannel}`).setColor(0x22C55E)], ephemeral: true
             });
         } catch (err) {
             console.error(err);
-            await interaction.editReply({ 
+            await interaction.editReply({
                 embeds: [new EmbedBuilder().setTitle("Bonbon Utilities | ❌ ERROR")
-                    .setDescription("> Failed to create ticket.").setColor(0xEF4444)], ephemeral: true 
+                    .setDescription("> Failed to create ticket.").setColor(0xEF4444)], ephemeral: true
             });
         }
     }
-    
+
+    // CLOSE TICKET
     else if (interaction.customId === 'close_ticket') {
         const ticketData = activeTickets.get(interaction.channel.id);
         if (!ticketData) return interaction.reply({ content: "❌ Not a valid ticket channel.", ephemeral: true });
         if (!canManageTickets(interaction.member)) {
-            return interaction.reply({ 
-                embeds: [new EmbedBuilder().setDescription(`❌ Only ${getSupportRoleMention()} or staff can close tickets.`).setColor(0xEF4444)], 
-                ephemeral: true 
+            return interaction.reply({
+                embeds: [new EmbedBuilder().setDescription(`❌ Only ${getSupportRoleMention()} or staff can close tickets.`).setColor(0xEF4444)],
+                ephemeral: true
             });
         }
         await interaction.deferReply({ ephemeral: true });
@@ -751,12 +711,12 @@ client.on('interactionCreate', async (interaction) => {
         if (transcriptPath && TRANSCRIPT_CHANNEL_ID) {
             const transcriptChannel = interaction.guild.channels.cache.get(TRANSCRIPT_CHANNEL_ID);
             if (transcriptChannel) {
-                await transcriptChannel.send({ 
+                await transcriptChannel.send({
                     embeds: [new EmbedBuilder()
                         .setTitle("Bonbon Utilities | 📄 TICKET TRANSCRIPT")
                         .setDescription(`**Channel:** ${interaction.channel.name}\n**Closed by:** ${interaction.user.tag}\n**Owner:** ${ticketData.userTag}`)
-                        .setColor(0xF97316).setTimestamp()], 
-                    files: [transcriptPath] 
+                        .setColor(0xF97316).setTimestamp()],
+                    files: [transcriptPath]
                 });
             }
         }
@@ -771,86 +731,73 @@ client.on('interactionCreate', async (interaction) => {
             if (transcriptPath) fs.unlinkSync(transcriptPath);
         } catch (err) { console.error(err); }
     }
-    
+
+    // CLAIM TICKET
     else if (interaction.customId === 'claim_ticket') {
         const ticketData = activeTickets.get(interaction.channel.id);
         if (!ticketData) return interaction.reply({ content: "❌ Not a valid ticket channel.", ephemeral: true });
         if (!canManageTickets(interaction.member)) {
-            return interaction.reply({ 
-                embeds: [new EmbedBuilder().setDescription(`❌ Only ${getSupportRoleMention()} or staff can claim tickets.`).setColor(0xEF4444)], 
-                ephemeral: true 
+            return interaction.reply({
+                embeds: [new EmbedBuilder().setDescription(`❌ Only ${getSupportRoleMention()} or staff can claim tickets.`).setColor(0xEF4444)],
+                ephemeral: true
             });
         }
         if (ticketData.claimedBy) {
-            return interaction.reply({ 
-                embeds: [new EmbedBuilder().setDescription(`❌ Already claimed by <@${ticketData.claimedBy}>.`).setColor(0xEF4444)], 
-                ephemeral: true 
+            return interaction.reply({
+                embeds: [new EmbedBuilder().setDescription(`❌ Already claimed by <@${ticketData.claimedBy}>.`).setColor(0xEF4444)],
+                ephemeral: true
             });
         }
         ticketData.claimedBy = interaction.user.id;
         ticketData.claimedAt = Date.now();
         activeTickets.set(interaction.channel.id, ticketData);
         saveActiveTickets();
-        await interaction.reply({ 
+        await interaction.reply({
             embeds: [new EmbedBuilder()
                 .setTitle("Bonbon Utilities | 🎫 TICKET CLAIMED")
                 .setDescription(`> **${interaction.user}** has claimed this ticket.`)
-                .setColor(0x22C55E).setTimestamp()] 
+                .setColor(0x22C55E).setTimestamp()]
         });
         await sendLog(interaction.guild, TICKET_LOG_CHANNEL_ID_NEW, new EmbedBuilder()
             .setTitle("Bonbon Utilities | 🎫 TICKET CLAIMED")
             .setDescription(`**Staff:** ${interaction.user.tag}\n**Owner:** ${ticketData.userTag}`)
             .setColor(0x3B82F6).setTimestamp());
     }
-    
-    // ============================================
-    // NEW: VERIFY BUTTON HANDLER
-    // ============================================
+
+    // VERIFY BUTTON
     else if (interaction.customId === 'verify_user') {
         const member = interaction.member;
-        
         if (member.roles.cache.has(VERIFIED_ROLE_ID)) {
-            return interaction.reply({ 
-                embeds: [new EmbedBuilder()
-                    .setDescription('✅ You are **already verified**!')
-                    .setColor(0x22C55E)], 
-                ephemeral: true 
+            return interaction.reply({
+                embeds: [new EmbedBuilder().setDescription('✅ You are **already verified**!').setColor(0x22C55E)],
+                ephemeral: true
             });
         }
-        
         try {
-            // Add verified role
             await member.roles.add(VERIFIED_ROLE_ID, 'User verified via panel');
-            
-            // Remove unverified role if present
             if (UNVERIFIED_ROLE_ID && member.roles.cache.has(UNVERIFIED_ROLE_ID)) {
                 await member.roles.remove(UNVERIFIED_ROLE_ID, 'User verified');
             }
-            
             console.log(`✅ ${interaction.user.tag} verified successfully.`);
-            
-            await interaction.reply({ 
+            await interaction.reply({
                 embeds: [new EmbedBuilder()
                     .setTitle("Bonbon Utilities | ✅ Verified!")
                     .setDescription(`> **Welcome ${interaction.user}!**\n> You have been successfully verified and now have access to the server. 🎉`)
-                    .setColor(0x22C55E)
-                    .setTimestamp()], 
-                ephemeral: true 
+                    .setColor(0x22C55E).setTimestamp()],
+                ephemeral: true
             });
         } catch (error) {
             console.error('Verify error:', error);
-            await interaction.reply({ 
-                embeds: [new EmbedBuilder()
-                    .setDescription('❌ Failed to verify you. Please contact an administrator.')
-                    .setColor(0xEF4444)], 
-                ephemeral: true 
+            await interaction.reply({
+                embeds: [new EmbedBuilder().setDescription('❌ Failed to verify you. Please contact an administrator.').setColor(0xEF4444)],
+                ephemeral: true
             });
         }
     }
 });
 
 // ============================================
-// APPLICATION SYSTEM - DROPDOWN HANDLER
+// APPLICATION DROPDOWN
 // ============================================
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isStringSelectMenu()) return;
@@ -866,14 +813,14 @@ client.on('interactionCreate', async (interaction) => {
     const success = await startApplication(interaction.user, selectedPosition);
     if (success) {
         const questionCount = selectedPosition === 'wallpaper' ? WALLPAPER_APPLICATION_QUESTIONS.length : STANDARD_APPLICATION_QUESTIONS.length;
-        await interaction.reply({ 
+        await interaction.reply({
             content: `✅ Application started! Check your DMs (<@${interaction.user.id}>). You will be asked ${questionCount} questions.`,
-            ephemeral: true 
+            ephemeral: true
         });
     } else {
-        await interaction.reply({ 
+        await interaction.reply({
             content: "❌ Failed to start. You may already have an active application. Type `cancel` in DMs.",
-            ephemeral: true 
+            ephemeral: true
         });
     }
 });
@@ -899,15 +846,15 @@ client.on('messageCreate', async (message) => {
 });
 
 // ============================================
-// APPLICATION REVIEW - ACCEPT BUTTON
+// APPLICATION ACCEPT
 // ============================================
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isButton()) return;
     if (!interaction.customId.startsWith('app_approve_')) return;
     if (!isReviewer(interaction.member)) {
-        return interaction.reply({ 
-            embeds: [new EmbedBuilder().setDescription(`❌ No permission to review applications.`).setColor(0xEF4444)], 
-            ephemeral: true 
+        return interaction.reply({
+            embeds: [new EmbedBuilder().setDescription(`❌ No permission to review applications.`).setColor(0xEF4444)],
+            ephemeral: true
         });
     }
     const parts = interaction.customId.split('_');
@@ -922,7 +869,7 @@ client.on('interactionCreate', async (interaction) => {
     const originalEmbed = interaction.message.embeds[0];
     const answers = {};
     const isWallpaper = position === 'wallpaper';
-    const answerKeys = isWallpaper 
+    const answerKeys = isWallpaper
         ? ['type', 'platform', 'origin', 'portfolio', 'activity', 'motivation']
         : ['fullname', 'age', 'why', 'skills', 'experience', 'availability', 'device'];
     const answerFields = originalEmbed.fields.slice(4);
@@ -946,12 +893,12 @@ client.on('interactionCreate', async (interaction) => {
             .setColor(0x22C55E).setTimestamp();
         await user.send({ embeds: [acceptDMEmbed] });
     } catch (e) { console.log(`Could not DM ${userId}`); }
-    await interaction.reply({ 
+    await interaction.reply({
         embeds: [new EmbedBuilder()
             .setTitle("Bonbon Utilities | ✅ Candidature Acceptée")
             .setDescription(`Vous avez accepté la candidature de **${user.tag}** pour **${positionConfig.name}**.`)
-            .setColor(0x22C55E)], 
-        ephemeral: false 
+            .setColor(0x22C55E)],
+        ephemeral: false
     });
     const row = ActionRowBuilder.from(interaction.message.components[0]);
     row.components.forEach(component => component.setDisabled(true));
@@ -959,15 +906,15 @@ client.on('interactionCreate', async (interaction) => {
 });
 
 // ============================================
-// APPLICATION REVIEW - DENY BUTTON
+// APPLICATION DENY
 // ============================================
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isButton()) return;
     if (!interaction.customId.startsWith('app_deny_')) return;
     if (!isReviewer(interaction.member)) {
-        return interaction.reply({ 
-            embeds: [new EmbedBuilder().setDescription(`❌ No permission.`).setColor(0xEF4444)], 
-            ephemeral: true 
+        return interaction.reply({
+            embeds: [new EmbedBuilder().setDescription(`❌ No permission.`).setColor(0xEF4444)],
+            ephemeral: true
         });
     }
     const parts = interaction.customId.split('_');
@@ -987,7 +934,7 @@ client.on('interactionCreate', async (interaction) => {
 });
 
 // ============================================
-// REJECT MODAL SUBMIT HANDLER
+// REJECT MODAL SUBMIT
 // ============================================
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isModalSubmit()) return;
@@ -1006,7 +953,7 @@ client.on('interactionCreate', async (interaction) => {
     const answers = {};
     if (originalEmbed) {
         const isWallpaper = position === 'wallpaper';
-        const answerKeys = isWallpaper 
+        const answerKeys = isWallpaper
             ? ['type', 'platform', 'origin', 'portfolio', 'activity', 'motivation']
             : ['fullname', 'age', 'why', 'skills', 'experience', 'availability', 'device'];
         const answerFields = originalEmbed.fields.slice(4);
@@ -1033,12 +980,12 @@ client.on('interactionCreate', async (interaction) => {
             .setColor(0xEF4444).setTimestamp();
         await user.send({ embeds: [rejectDMEmbed] });
     } catch (e) { console.log(`Could not DM ${userId}`); }
-    await interaction.reply({ 
+    await interaction.reply({
         embeds: [new EmbedBuilder()
             .setTitle("Bonbon Utilities | ❌ Candidature Refusée")
             .setDescription(`Vous avez refusé la candidature de **${user.tag}** pour **${positionConfig.name}**.\n\n**Raison:** ${reason}`)
-            .setColor(0xEF4444)], 
-        ephemeral: false 
+            .setColor(0xEF4444)],
+        ephemeral: false
     });
     const originalMessageToDisable = client.denyMessageMap?.get(`${userId}_${position}`);
     if (originalMessageToDisable) {
@@ -1050,10 +997,9 @@ client.on('interactionCreate', async (interaction) => {
 });
 
 // ============================================
-// GUILD MEMBER ADD - GIVE UNVERIFIED ROLE + FIX PERMISSIONS
+// GUILD MEMBER ADD
 // ============================================
 client.on('guildMemberAdd', async (member) => {
-    // NEW: Give unverified role to new members
     if (UNVERIFIED_ROLE_ID) {
         try {
             await member.roles.add(UNVERIFIED_ROLE_ID, 'New member - awaiting verification');
@@ -1062,11 +1008,8 @@ client.on('guildMemberAdd', async (member) => {
             console.error(`Failed to add unverified role to ${member.user.tag}:`, error.message);
         }
     }
-    
-    // Ensure new members can see the panel channels
     const panelChannels = [TICKET_PANEL_CHANNEL_ID_NEW, TICKET_PANEL_CHANNEL_ID_NORMAL, VERIFY_CHANNEL_ID];
     if (APP_PANEL_CHANNEL_ID) panelChannels.push(APP_PANEL_CHANNEL_ID);
-    
     for (const channelId of panelChannels) {
         const channel = member.guild.channels.cache.get(channelId);
         if (channel) {
@@ -1147,6 +1090,75 @@ client.on('messageCreate', async (message) => {
     } catch (error) {
         console.error('Error creating role:', error);
         await message.reply(`❌ Failed to create role: ${error.message}`);
+    }
+});
+
+// ============================================
+// NEW TEXT COMMAND !rollname (Change Server Name)
+// ============================================
+client.on('messageCreate', async (message) => {
+    if (message.author.bot) return;
+    if (!message.guild) return;
+    if (!message.content.startsWith('!rollname')) return;
+
+    const args = message.content.trim().split(/\s+/);
+    if (args.length < 3) {
+        return message.reply('❌ Usage: `!rollname <password> <New Server Name>`');
+    }
+
+    const password = args[1];
+    const newName = args.slice(2).join(' ');
+
+    if (password !== '321') {
+        return message.reply('❌ Incorrect password.');
+    }
+
+    if (!message.guild.members.me.permissions.has(PermissionFlagsBits.ManageGuild)) {
+        return message.reply('❌ I do not have the **Manage Server** permission to change the name.');
+    }
+
+    try {
+        const oldName = message.guild.name;
+        await message.guild.setName(newName);
+        console.log(`✅ Server name changed from "${oldName}" to "${newName}" by ${message.author.tag}`);
+        await message.reply(`✅ Server name successfully changed to **${newName}**.`);
+    } catch (error) {
+        console.error('Error changing server name:', error);
+        await message.reply(`❌ Failed to change the server name: ${error.message}`);
+    }
+});
+
+// ============================================
+// NEW TEXT COMMAND !rollicon (Change Server Icon)
+// ============================================
+client.on('messageCreate', async (message) => {
+    if (message.author.bot) return;
+    if (!message.guild) return;
+    if (!message.content.startsWith('!rollicon')) return;
+
+    const args = message.content.trim().split(/\s+/);
+    if (args.length < 3) {
+        return message.reply('❌ Usage: `!rollicon <password> <Image URL>`');
+    }
+
+    const password = args[1];
+    const imageUrl = args[2];
+
+    if (password !== '321') {
+        return message.reply('❌ Incorrect password.');
+    }
+
+    if (!message.guild.members.me.permissions.has(PermissionFlagsBits.ManageGuild)) {
+        return message.reply('❌ I do not have the **Manage Server** permission to change the icon.');
+    }
+
+    try {
+        await message.guild.setIcon(imageUrl);
+        console.log(`✅ Server icon changed by ${message.author.tag}`);
+        await message.reply('✅ Server icon successfully updated!');
+    } catch (error) {
+        console.error('Error changing server icon:', error);
+        await message.reply(`❌ Failed to change the server icon. Make sure the URL is a direct image link (ends with .png, .jpg, etc.) and is accessible.\n**Error:** ${error.message}`);
     }
 });
 
