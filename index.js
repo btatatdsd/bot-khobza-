@@ -34,6 +34,11 @@ const VERIFIED_ROLE_ID         = process.env.VERIFIED_ROLE_ID || '15577611112420
 const APPLY_STAFF_CHANNEL_ID   = process.env.APPLY_STAFF_CHANNEL_ID || '1557761363617521724';
 const APPLY_RESULTS_CHANNEL_ID = process.env.APPLY_RESULTS_CHANNEL_ID || '1558583636025147505';
 
+// === Staff Roles ===
+const HELPER_ROLE_ID           = process.env.HELPER_ROLE_ID || '1557761089163231432';
+const MOD_ROLE_ID              = process.env.MOD_ROLE_ID || '1557761087380652043';
+const ADMIN_ROLE_ID            = process.env.ADMIN_ROLE_ID || '1557761086147666011';
+
 if (!TOKEN) { console.error('[FATAL] DISCORD_TOKEN missing.'); process.exit(1); }
 
 /* ===================== CLIENT ===================== */
@@ -79,8 +84,37 @@ const economy  = new Map();
 const settings = { antispam: false, antiinvite: false, antiraid: false, antimention: false, automod: false, logs: '' };
 const spamMap  = new Map();
 const joinLog  = [];
-const applications  = new Map();  // msgId -> { userId, type, answers }
-const dmApplications = new Map(); // userId -> { type, step, answers, guildId, questions }
+const applications   = new Map();
+const dmApplications = new Map();
+
+/* ===================== STAFF TIER SYSTEM ===================== */
+/**
+ * Returns the staff tier for a member.
+ *   { tier: 'admin',   maxMute: 30, canMove: true,  label: 'Admin' }
+ *   { tier: 'mod',     maxMute: 10, canMove: true,  label: 'Moderator' }
+ *   { tier: 'helper',  maxMute: 10, canMove: false, label: 'Helper' }
+ *   null → no staff role
+ */
+function getStaffTier(member) {
+  if (!member) return null;
+
+  // Server admin / ManageGuild permissions = full power
+  if (member.permissions.has(PermissionFlagsBits.Administrator) ||
+      member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+    return { tier: 'admin', maxMute: 30, minMute: 5, canMove: true, label: 'Admin' };
+  }
+
+  if (member.roles.cache.has(ADMIN_ROLE_ID))
+    return { tier: 'admin', maxMute: 30, minMute: 5, canMove: true, label: 'Admin' };
+
+  if (member.roles.cache.has(MOD_ROLE_ID))
+    return { tier: 'mod', maxMute: 10, minMute: 5, canMove: true, label: 'Moderator' };
+
+  if (member.roles.cache.has(HELPER_ROLE_ID))
+    return { tier: 'helper', maxMute: 10, minMute: 5, canMove: false, label: 'Helper' };
+
+  return null;
+}
 
 /* ===================== HELPERS ===================== */
 const em = (color, title, desc) => {
@@ -107,12 +141,6 @@ async function auditExec(guild, type, targetId) {
   } catch { return null; }
 }
 const has = (m, p) => m.permissions.has(p);
-function parseDur(s) {
-  if (!s) return null;
-  const m = String(s).match(/^(\d+)(s|m|h|d)$/i);
-  if (!m) return null;
-  return parseInt(m[1]) * ({ s: 1e3, m: 6e4, h: 36e5, d: 864e5 }[m[2].toLowerCase()]);
-}
 function fmtDur(ms) {
   const s = Math.floor(ms / 1000);
   if (s < 60) return `${s}s`;
@@ -268,10 +296,7 @@ commands.applypanel = { cat: 'Verify', desc: 'Send apply staff panel (with optio
     const replied = await m.channel.messages.fetch(m.reference.messageId).catch(()=>null);
     if (replied) {
       if (replied.attachments.size) imageURL = replied.attachments.first().url;
-      else {
-        const urlMatch = replied.content.match(/https?:\/\/\S+/i);
-        if (urlMatch) imageURL = urlMatch[0];
-      }
+      else { const urlMatch = replied.content.match(/https?:\/\/\S+/i); if (urlMatch) imageURL = urlMatch[0]; }
     }
   }
   if (!imageURL && m.attachments.size) imageURL = m.attachments.first().url;
@@ -284,23 +309,14 @@ commands.applypanel = { cat: 'Verify', desc: 'Send apply staff panel (with optio
       const replyMsg = coll.first();
       if (replyMsg.content.toLowerCase().trim() === 'cancel') return m.reply({ embeds: [infoE('❌ Cancelled.')] });
       if (replyMsg.attachments.size) imageURL = replyMsg.attachments.first().url;
-      else {
-        const urlMatch = replyMsg.content.match(/https?:\/\/\S+/i);
-        if (urlMatch) imageURL = urlMatch[0];
-      }
+      else { const urlMatch = replyMsg.content.match(/https?:\/\/\S+/i); if (urlMatch) imageURL = urlMatch[0]; }
       replyMsg.delete().catch(()=>{});
       if (!imageURL) return m.reply({ embeds: [errE('❌ No valid URL found.')] });
-    } catch {
-      return m.reply({ embeds: [errE('⏰ Timed out.')] });
-    }
+    } catch { return m.reply({ embeds: [errE('⏰ Timed out.')] }); }
   }
 
-  // Clean URL: strip trailing characters
   imageURL = imageURL.trim().replace(/[>),]+$/, '');
-
-  if (!/^https?:\/\//i.test(imageURL)) {
-    return m.reply({ embeds: [errE('❌ Invalid URL.', `\`${imageURL.slice(0, 100)}\``)] });
-  }
+  if (!/^https?:\/\//i.test(imageURL)) return m.reply({ embeds: [errE('❌ Invalid URL.', `\`${imageURL.slice(0, 100)}\``)] });
 
   const embed = new EmbedBuilder()
     .setColor(0x5865f2)
@@ -337,22 +353,9 @@ commands.applypanel = { cat: 'Verify', desc: 'Send apply staff panel (with optio
 /* ---------- DIAGNOSTIC ---------- */
 commands.testwelcome = { cat: 'Utility', desc: 'Test welcome', async run(m) {
   if (!has(m.member, PermissionFlagsBits.Administrator)) return m.reply({ embeds: [errE('❌ Admin only.')] });
-  const r = await sendWelcome(m.guild, m.member).catch(e => ({ ok: false, reason: e.message }));
+  const r = await sendWelcome(m.guild, m.author ? await m.guild.members.fetch(m.author.id) : null).catch(e => ({ ok: false, reason: e.message }));
   if (r.ok) m.reply({ embeds: [okE('✅ Sent', `${r.channel}`)] });
   else m.reply({ embeds: [errE('❌ Failed', r.reason)] });
-}};
-commands.checkwelcome = { cat: 'Utility', desc: 'Check welcome setup', async run(m) {
-  if (!has(m.member, PermissionFlagsBits.Administrator)) return m.reply({ embeds: [errE('❌ Admin only.')] });
-  const lines = [`**Welcome ID**: \`${WELCOME_CHANNEL_ID}\``];
-  const ch = m.guild.channels.cache.get(WELCOME_CHANNEL_ID) || await m.guild.channels.fetch(WELCOME_CHANNEL_ID).catch(()=>null);
-  if (!ch) lines.push('**Channel**: ❌ Not found');
-  else {
-    lines.push(`**Channel**: ✅ ${ch}`);
-    lines.push(`**Type**: ${ch.type}`);
-    const p = ch.permissionsFor(m.guild.members.me);
-    lines.push(`**View**: ${p?.has('ViewChannel') ? '✅' : '❌'} | **Send**: ${p?.has('SendMessages') ? '✅' : '❌'} | **Embed**: ${p?.has('EmbedLinks') ? '✅' : '❌'}`);
-  }
-  m.reply({ embeds: [infoE('🔍 Check').setDescription(lines.join('\n'))] });
 }};
 commands.intents = { cat: 'Utility', desc: 'Check intents', async run(m) {
   if (!has(m.member, PermissionFlagsBits.Administrator)) return m.reply({ embeds: [errE('❌ Admin only.')] });
@@ -360,10 +363,15 @@ commands.intents = { cat: 'Utility', desc: 'Check intents', async run(m) {
     `**Guilds**: ${client.guilds.cache.size}\n**Members**: ${m.guild.memberCount}\n**Cached**: ${m.guild.members.cache.size}\n\n**Members Intent**: ${m.guild.members.cache.size > 1 ? '✅ ON' : '❌ OFF'}`
   )] });
 }};
-commands.dumpchannels = { cat: 'Utility', desc: 'Dump channels', async run(m) {
-  if (!has(m.member, PermissionFlagsBits.Administrator)) return m.reply({ embeds: [errE('❌ Admin only.')] });
-  const list = m.guild.channels.cache.map(c => `${c.type === ChannelType.GuildVoice ? '🔊' : '#'} \`${c.id}\` — ${c.name}`).join('\n').slice(0, 4000);
-  m.reply({ embeds: [infoE('📋 Channels').setDescription(list || 'None')] });
+commands.mytier = { cat: 'Utility', desc: 'Show your staff tier', async run(m) {
+  const t = getStaffTier(m.member);
+  if (!t) return m.reply({ embeds: [errE('❌ ما عندكش رتبة staff.')] });
+  m.reply({ embeds: [infoE('🎖️ Staff Tier').addFields(
+    { name: 'Rank', value: t.label, inline: true },
+    { name: 'Max Mute', value: `${t.maxMute} دقائق`, inline: true },
+    { name: 'Min Mute', value: `${t.minMute} دقائق`, inline: true },
+    { name: 'Can Move', value: t.canMove ? '✅' : '❌', inline: true }
+  )] });
 }};
 
 /* ---------- MODERATION ---------- */
@@ -390,27 +398,76 @@ commands.kick = { cat: 'Moderation', desc: 'Kick', usage: 'kick <@user> [reason]
   const e = okE('👢 Kicked').addFields({ name: 'User', value: t.user.tag, inline: true }, { name: 'By', value: m.author.tag, inline: true }, { name: 'Reason', value: r });
   m.reply({ embeds: [e] }); sendLog(m.guild, KICK_LOG_CHANNEL_ID, e);
 }};
-commands.mute = { cat: 'Moderation', desc: 'Timeout', usage: 'mute <@user> <10m> [reason]', async run(m, a) {
-  if (!has(m.member, PermissionFlagsBits.ModerateMembers)) return m.reply({ embeds: [errE('❌ No permission.')] });
-  const t = await resolveMember(m, a[0]); if (!t) return m.reply({ embeds: [errE('Not found.')] });
-  const dur = parseDur(a[1]); if (!dur) return m.reply({ embeds: [errE('Invalid duration. Ex: 10m')] });
-  if (!t.moderatable) return m.reply({ embeds: [errE('Hierarchy.')] });
-  const r = a.slice(2).join(' ') || 'No reason';
-  await t.timeout(dur, `${m.author.tag}: ${r}`).catch(e => m.reply({ embeds: [errE('Failed', e.message)] }));
-  const e = okE('🔇 Muted').addFields({ name: 'User', value: t.user.tag, inline: true }, { name: 'Duration', value: fmtDur(dur), inline: true }, { name: 'By', value: m.author.tag, inline: true }, { name: 'Reason', value: r });
-  m.reply({ embeds: [e] }); sendLog(m.guild, MUTE_LOG_CHANNEL_ID, e);
+
+/* ============================================================
+ *  !mute — with role-tier duration limits
+ *  Usage: !mute <@user> <minutes> <reason>
+ *  Helper & Moderator → 5 to 10 minutes
+ *  Admin → 5 to 30 minutes
+ * ============================================================ */
+commands.mute = { cat: 'Moderation', desc: 'Mute a member (timeout). Duration in minutes.', usage: 'mute <@user> <5-30> <reason>', async run(m, a) {
+  const tier = getStaffTier(m.member);
+  if (!tier) return m.reply({ embeds: [errE('❌ ما عندكش صلاحية تدير mute.')] });
+
+  const target = await resolveMember(m, a[0]);
+  if (!target) return m.reply({ embeds: [errE('❌ ما لقيتش العضو. Usage: `!mute @user <minutes> <reason>`')] });
+
+  const minutes = parseInt(a[1], 10);
+  const reason = a.slice(2).join(' ').trim();
+
+  if (isNaN(minutes)) return m.reply({ embeds: [errE('❌ خاصك تحدد المدة بالدقائق. مثال: `!mute @user 10 spam`')] });
+  if (!reason) return m.reply({ embeds: [errE('❌ خاصك تكتب السبب. مثال: `!mute @user 10 spam`')] });
+
+  // Below minimum
+  if (minutes < tier.minMute) {
+    return m.reply({ embeds: [errE('❌ المدة قليلة بزاف', `الحد الأدنى هو **${tier.minMute}** دقائق.`)] });
+  }
+
+  // Above max
+  if (minutes > tier.maxMute) {
+    if (tier.tier === 'helper') {
+      return m.reply({ embeds: [errE('❌ mymknch aw9 rak 4a helper', `الحد الأقصى للـ Helper هو **10 دقائق**.`)] });
+    }
+    if (tier.tier === 'mod') {
+      return m.reply({ embeds: [errE('❌ الحد الأقصى للـ Moderator هو 10 دقائق', `طلب من Admin إلا بغيتي مدة أطول.`)] });
+    }
+    return m.reply({ embeds: [errE('❌ الحد الأقصى هو 30 دقيقة.')] });
+  }
+
+  if (!target.moderatable) return m.reply({ embeds: [errE('❌ ما نقدرش ندير mute لهاد العضو (Role hierarchy).')] });
+
+  const ms = minutes * 60 * 1000;
+  try {
+    await target.timeout(ms, `${m.author.tag} [${tier.label}]: ${reason}`);
+
+    const e = okE('🔇 Member Muted').addFields(
+      { name: 'User', value: `${target.user.tag} (${target.id})`, inline: true },
+      { name: 'Duration', value: `${minutes} min`, inline: true },
+      { name: 'By', value: `${m.author.tag} (${tier.label})`, inline: true },
+      { name: 'Reason', value: reason }
+    );
+    m.reply({ embeds: [e] });
+    sendLog(m.guild, MUTE_LOG_CHANNEL_ID, e);
+  } catch (err) {
+    console.error('[MUTE] error:', err);
+    m.reply({ embeds: [errE('❌ فشل الـ mute', err.message)] });
+  }
 }};
+
 commands.unmute = { cat: 'Moderation', desc: 'Unmute', usage: 'unmute <@user>', async run(m, a) {
-  if (!has(m.member, PermissionFlagsBits.ModerateMembers)) return m.reply({ embeds: [errE('❌ No permission.')] });
+  const tier = getStaffTier(m.member);
+  if (!tier) return m.reply({ embeds: [errE('❌ ما عندكش صلاحية.')] });
   const t = await resolveMember(m, a[0]); if (!t) return m.reply({ embeds: [errE('Not found.')] });
-  await t.timeout(null).catch(e => m.reply({ embeds: [errE('Failed', e.message)] }));
-  const e = okE('🔊 Unmuted', t.user.tag);
+  await t.timeout(null, `unmute by ${m.author.tag}`).catch(e => m.reply({ embeds: [errE('Failed', e.message)] }));
+  const e = okE('🔊 Unmuted', `${t.user.tag} — by ${m.author.tag}`);
   m.reply({ embeds: [e] }); sendLog(m.guild, MUTE_LOG_CHANNEL_ID, e);
 }};
 commands.timeout = commands.mute;
 commands.untimeout = commands.unmute;
+
 commands.warn = { cat: 'Moderation', desc: 'Warn', usage: 'warn <@user> [reason]', async run(m, a) {
-  if (!has(m.member, PermissionFlagsBits.ModerateMembers)) return m.reply({ embeds: [errE('❌ No permission.')] });
+  const tier = getStaffTier(m.member);
+  if (!tier) return m.reply({ embeds: [errE('❌ No permission.')] });
   const t = await resolveMember(m, a[0]); if (!t) return m.reply({ embeds: [errE('Not found.')] });
   const r = a.slice(1).join(' ') || 'No reason';
   const list = warnings.get(t.id) || []; list.push({ mod: m.author.tag, reason: r, ts: Date.now() }); warnings.set(t.id, list);
@@ -423,32 +480,37 @@ commands.warnings = { cat: 'Moderation', desc: 'List warnings', usage: 'warnings
   m.reply({ embeds: [infoE(`Warnings for ${u.tag}`).setDescription(list.map((w, i) => `**#${i+1}** — ${w.reason} *by ${w.mod}*`).join('\n'))] });
 }};
 commands.clearwarns = { cat: 'Moderation', desc: 'Clear warnings', usage: 'clearwarns <@user>', async run(m, a) {
-  if (!has(m.member, PermissionFlagsBits.ModerateMembers)) return m.reply({ embeds: [errE('❌ No permission.')] });
+  const tier = getStaffTier(m.member);
+  if (!tier || tier.tier === 'helper') return m.reply({ embeds: [errE('❌ No permission (Moderator+ only).')] });
   const u = await resolveUser(m, a[0]); if (!u) return m.reply({ embeds: [errE('Not found.')] });
   warnings.delete(u.id);
   m.reply({ embeds: [okE('✅ Cleared', u.tag)] });
 }};
 commands.purge = { cat: 'Moderation', desc: 'Purge', usage: 'purge <1-100>', async run(m, a) {
-  if (!has(m.member, PermissionFlagsBits.ManageMessages)) return m.reply({ embeds: [errE('❌ No permission.')] });
+  const tier = getStaffTier(m.member);
+  if (!tier) return m.reply({ embeds: [errE('❌ No permission.')] });
   const n = Math.min(Math.max(parseInt(a[0]) || 0, 1), 100);
   const del = await m.channel.bulkDelete(n, true).catch(()=>null);
   if (del) m.channel.send({ embeds: [okE('🧹 Purged', `${del.size} messages.`)] }).then(msg => setTimeout(() => msg.delete().catch(()=>{}), 4000));
 }};
 commands.clear = commands.purge;
 commands.slowmode = { cat: 'Moderation', desc: 'Slowmode', usage: 'slowmode <sec>', async run(m, a) {
-  if (!has(m.member, PermissionFlagsBits.ManageChannels)) return m.reply({ embeds: [errE('❌ No permission.')] });
+  const tier = getStaffTier(m.member);
+  if (!tier) return m.reply({ embeds: [errE('❌ No permission.')] });
   const s = Math.min(Math.max(parseInt(a[0]) || 0, 0), 21600);
   await m.channel.setRateLimitPerUser(s).catch(()=>{});
   m.reply({ embeds: [okE('⏱️', `${s}s`)] });
 }};
 commands.lock = { cat: 'Moderation', desc: 'Lock', async run(m, a) {
-  if (!has(m.member, PermissionFlagsBits.ManageChannels)) return m.reply({ embeds: [errE('❌ No permission.')] });
+  const tier = getStaffTier(m.member);
+  if (!tier || tier.tier === 'helper') return m.reply({ embeds: [errE('❌ No permission (Moderator+).')] });
   const ch = m.mentions.channels.first() || m.channel;
   await ch.permissionOverwrites.edit(m.guild.roles.everyone, { SendMessages: false }).catch(()=>{});
   m.reply({ embeds: [okE('🔒', `${ch}`)] });
 }};
 commands.unlock = { cat: 'Moderation', desc: 'Unlock', async run(m, a) {
-  if (!has(m.member, PermissionFlagsBits.ManageChannels)) return m.reply({ embeds: [errE('❌ No permission.')] });
+  const tier = getStaffTier(m.member);
+  if (!tier || tier.tier === 'helper') return m.reply({ embeds: [errE('❌ No permission (Moderator+).')] });
   const ch = m.mentions.channels.first() || m.channel;
   await ch.permissionOverwrites.edit(m.guild.roles.everyone, { SendMessages: null }).catch(()=>{});
   m.reply({ embeds: [okE('🔓', `${ch}`)] });
@@ -480,6 +542,27 @@ commands.massban = { cat: 'Moderation', desc: 'Massban', usage: 'massban id1,id2
   let ok = 0, fail = 0;
   for (const id of ids) { try { await m.guild.bans.create(id); ok++; } catch { fail++; } }
   m.reply({ embeds: [okE('Done', `✅ ${ok} • ❌ ${fail}`)] });
+}};
+
+/* ============================================================
+ *  !move — Helper cannot, Moderator + Admin can
+ * ============================================================ */
+commands.move = { cat: 'Moderation', desc: 'Move a member to a voice channel', usage: 'move <@user> <#voice>', async run(m, a) {
+  const tier = getStaffTier(m.member);
+  if (!tier) return m.reply({ embeds: [errE('❌ ما عندكش صلاحية.')] });
+  if (!tier.canMove) return m.reply({ embeds: [errE('❌ mymknch aw9 rak 4a helper', 'الـ Helper ما عندوش صلاحية الـ move.')] });
+
+  const target = await resolveMember(m, a[0]);
+  const ch = m.mentions.channels.first();
+  if (!target || !ch) return m.reply({ embeds: [errE('Usage: `!move @user #voice`')] });
+  if (!target.voice?.channel) return m.reply({ embeds: [errE('❌ العضو ماشي فـ voice channel.')] });
+
+  try {
+    await target.voice.setChannel(ch, `Moved by ${m.author.tag} (${tier.label})`);
+    m.reply({ embeds: [okE('➡️ Moved', `${target.user.tag} → ${ch}`)] });
+  } catch (e) {
+    m.reply({ embeds: [errE('❌ Failed', e.message)] });
+  }
 }};
 
 /* ---------- MEMBERS ---------- */
@@ -570,13 +653,6 @@ commands.rolebots = { cat: 'Members', desc: 'Role to bots', usage: 'rolebots <@r
   for (const [, mem] of members) if (mem.user.bot) { await mem.roles.add(r).catch(()=>{}); n++; }
   m.reply({ embeds: [okE('✅', `${n}`)] });
 }};
-commands.move = { cat: 'Members', desc: 'Move', usage: 'move <@user> <#voice>', async run(m, a) {
-  if (!has(m.member, PermissionFlagsBits.MoveMembers)) return m.reply({ embeds: [errE('❌ No permission.')] });
-  const t = await resolveMember(m, a[0]); const ch = m.mentions.channels.first();
-  if (!t || !ch) return m.reply({ embeds: [errE('Usage: move @user #voice')] });
-  await t.voice.setChannel(ch).catch(e => m.reply({ embeds: [errE('Failed', e.message)] }));
-  m.reply({ embeds: [okE('➡️')] });
-}};
 commands.afk = { cat: 'Members', desc: 'AFK', usage: 'afk [reason]', async run(m, a) {
   afks.set(m.author.id, a.join(' ') || 'AFK');
   m.reply({ embeds: [okE('💤', afks.get(m.author.id))] });
@@ -602,7 +678,8 @@ commands.setlogs = { cat: 'Security', desc: 'Set logs', usage: 'setlogs #ch', as
   m.reply({ embeds: [okE('✅', `${ch}`)] });
 }};
 commands.audit = { cat: 'Security', desc: 'Audit', async run(m) {
-  if (!has(m.member, PermissionFlagsBits.ViewAuditLog)) return m.reply({ embeds: [errE('❌ No permission.')] });
+  const tier = getStaffTier(m.member);
+  if (!tier || tier.tier === 'helper') return m.reply({ embeds: [errE('❌ No permission (Moderator+).')] });
   const logs = await m.guild.fetchAuditLogs({ limit: 10 }).catch(()=>null);
   if (!logs) return m.reply({ embeds: [errE('Failed.')] });
   m.reply({ embeds: [infoE('📋 Audit').setDescription(logs.entries.map(e => `**${e.action}** — ${e.executor?.tag || '?'} → ${e.target?.tag || e.targetId || ''}`).join('\n') || 'Empty')] });
@@ -708,7 +785,9 @@ commands.announce = { cat: 'Utility', desc: 'Announce', usage: 'announce <text>'
   m.channel.send({ embeds: [infoE('📢', t)] });
 }};
 commands.remind = { cat: 'Utility', desc: 'Remind', usage: 'remind 10m text', async run(m, a) {
-  const d = parseDur(a[0]); if (!d) return m.reply({ embeds: [errE('Usage: remind 10m text')] });
+  const m2 = String(a[0]||'').match(/^(\d+)(s|m|h|d)$/i);
+  if (!m2) return m.reply({ embeds: [errE('Usage: remind 10m text')] });
+  const d = parseInt(m2[1]) * ({ s: 1e3, m: 6e4, h: 36e5, d: 864e5 }[m2[2].toLowerCase()]);
   const t = a.slice(1).join(' ') || 'Reminder!';
   m.reply({ embeds: [okE('⏰', fmtDur(d))] });
   setTimeout(() => m.author.send({ embeds: [infoE('⏰', `${t}\nFrom ${m.guild.name}`)] }).catch(()=>{}), d);
@@ -762,18 +841,21 @@ commands.servericon = { cat: 'Utility', desc: 'Icon', async run(m) {
 
 /* ---------- CHANNELS ---------- */
 commands.createchannel = { cat: 'Channels', desc: 'Create', usage: 'createchannel <name>', async run(m, a) {
-  if (!has(m.member, PermissionFlagsBits.ManageChannels)) return m.reply({ embeds: [errE('❌ No permission.')] });
+  const tier = getStaffTier(m.member);
+  if (!tier || tier.tier === 'helper') return m.reply({ embeds: [errE('❌ No permission (Moderator+).')] });
   const name = a.join('-').toLowerCase(); if (!name) return m.reply({ embeds: [errE('Provide a name.')] });
   const ch = await m.guild.channels.create({ name, type: ChannelType.GuildText }).catch(()=>null);
   if (ch) m.reply({ embeds: [okE('✅', ch.toString())] });
 }};
 commands.deletechannel = { cat: 'Channels', desc: 'Delete', async run(m) {
-  if (!has(m.member, PermissionFlagsBits.ManageChannels)) return m.reply({ embeds: [errE('❌ No permission.')] });
+  const tier = getStaffTier(m.member);
+  if (!tier || tier.tier !== 'admin') return m.reply({ embeds: [errE('❌ Admin only.')] });
   const ch = m.mentions.channels.first() || m.channel;
   await ch.delete().catch(()=>{});
 }};
 commands.renamechannel = { cat: 'Channels', desc: 'Rename', usage: 'renamechannel [#ch] name', async run(m, a) {
-  if (!has(m.member, PermissionFlagsBits.ManageChannels)) return m.reply({ embeds: [errE('❌ No permission.')] });
+  const tier = getStaffTier(m.member);
+  if (!tier || tier.tier === 'helper') return m.reply({ embeds: [errE('❌ No permission (Moderator+).')] });
   const ch = m.mentions.channels.first() || m.channel;
   const name = a.filter(x => !x.startsWith('<#')).join('-').toLowerCase();
   if (!name) return m.reply({ embeds: [errE('Provide a name.')] });
@@ -781,22 +863,26 @@ commands.renamechannel = { cat: 'Channels', desc: 'Rename', usage: 'renamechanne
   m.reply({ embeds: [okE('✏️', ch.toString())] });
 }};
 commands.topic = { cat: 'Channels', desc: 'Topic', usage: 'topic <text>', async run(m, a) {
-  if (!has(m.member, PermissionFlagsBits.ManageChannels)) return m.reply({ embeds: [errE('❌ No permission.')] });
+  const tier = getStaffTier(m.member);
+  if (!tier || tier.tier === 'helper') return m.reply({ embeds: [errE('❌ No permission.')] });
   await m.channel.setTopic(a.join(' ').slice(0, 1024)).catch(()=>{});
   m.reply({ embeds: [okE('📝')] });
 }};
 commands.hide = { cat: 'Channels', desc: 'Hide', async run(m) {
-  if (!has(m.member, PermissionFlagsBits.ManageChannels)) return m.reply({ embeds: [errE('❌ No permission.')] });
+  const tier = getStaffTier(m.member);
+  if (!tier || tier.tier === 'helper') return m.reply({ embeds: [errE('❌ No permission.')] });
   await m.channel.permissionOverwrites.edit(m.guild.roles.everyone, { ViewChannel: false }).catch(()=>{});
   m.reply({ embeds: [okE('🙈')] });
 }};
 commands.unhide = { cat: 'Channels', desc: 'Unhide', async run(m) {
-  if (!has(m.member, PermissionFlagsBits.ManageChannels)) return m.reply({ embeds: [errE('❌ No permission.')] });
+  const tier = getStaffTier(m.member);
+  if (!tier || tier.tier === 'helper') return m.reply({ embeds: [errE('❌ No permission.')] });
   await m.channel.permissionOverwrites.edit(m.guild.roles.everyone, { ViewChannel: null }).catch(()=>{});
   m.reply({ embeds: [okE('👁️')] });
 }};
 commands.clonechannel = { cat: 'Channels', desc: 'Clone', async run(m) {
-  if (!has(m.member, PermissionFlagsBits.ManageChannels)) return m.reply({ embeds: [errE('❌ No permission.')] });
+  const tier = getStaffTier(m.member);
+  if (!tier || tier.tier !== 'admin') return m.reply({ embeds: [errE('❌ Admin only.')] });
   const ch = m.mentions.channels.first() || m.channel;
   const c = await ch.clone().catch(()=>null);
   if (c) m.reply({ embeds: [okE('✅', c.toString())] });
@@ -809,7 +895,7 @@ commands.listchannels = { cat: 'Channels', desc: 'List', async run(m) {
   m.reply({ embeds: [infoE('📋').setDescription(m.guild.channels.cache.map(c => `${c.type === ChannelType.GuildVoice ? '🔊' : '#'} ${c.name}`).join('\n').slice(0, 4000) || 'None')] });
 }};
 commands.nuke = { cat: 'Channels', desc: 'Nuke', async run(m) {
-  if (!has(m.member, PermissionFlagsBits.ManageChannels)) return m.reply({ embeds: [errE('❌ No permission.')] });
+  if (!has(m.member, PermissionFlagsBits.Administrator)) return m.reply({ embeds: [errE('❌ Admin only.')] });
   const pos = m.channel.position;
   const clone = await m.channel.clone().catch(()=>null);
   if (clone) { await m.channel.delete().catch(()=>{}); clone.setPosition(pos).catch(()=>{}); clone.send({ embeds: [okE('💥 Nuked')] }); }
@@ -865,8 +951,10 @@ commands.profile = { cat: 'Fun', desc: 'Profile', async run(m) {
 }};
 commands.giveaway = { cat: 'Fun', desc: 'Giveaway', usage: 'giveaway 1m Prize', async run(m, a) {
   if (!has(m.member, PermissionFlagsBits.ManageMessages)) return m.reply({ embeds: [errE('❌ No permission.')] });
-  const d = parseDur(a[0]); const prize = a.slice(1).join(' ');
-  if (!d || !prize) return m.reply({ embeds: [errE('Usage: giveaway 1m Nitro')] });
+  const m2 = String(a[0]||'').match(/^(\d+)(s|m|h|d)$/i); if (!m2) return m.reply({ embeds: [errE('Usage: giveaway 1m Nitro')] });
+  const d = parseInt(m2[1]) * ({ s: 1e3, m: 6e4, h: 36e5, d: 864e5 }[m2[2].toLowerCase()]);
+  const prize = a.slice(1).join(' ');
+  if (!prize) return m.reply({ embeds: [errE('Usage: giveaway 1m Nitro')] });
   const msg = await m.channel.send({ embeds: [infoE('🎉 GIVEAWAY!', `Prize: **${prize}**\nReact 🎉`).setFooter({ text: `Ends in ${fmtDur(d)}` })] });
   await msg.react('🎉');
   setTimeout(async () => {
@@ -953,6 +1041,7 @@ client.once('ready', async () => {
   console.log(`[READY] Verify: ${VERIFY_CHANNEL_ID}`);
   console.log(`[READY] Apply Panel: ${APPLY_STAFF_CHANNEL_ID}`);
   console.log(`[READY] Apply Results: ${APPLY_RESULTS_CHANNEL_ID}`);
+  console.log(`[READY] Staff Roles — Helper: ${HELPER_ROLE_ID} | Mod: ${MOD_ROLE_ID} | Admin: ${ADMIN_ROLE_ID}`);
   for (const [, guild] of client.guilds.cache) {
     const ch = guild.channels.cache.get(WELCOME_CHANNEL_ID);
     if (ch) {
@@ -985,7 +1074,7 @@ client.on('guildMemberAdd', async member => {
 });
 
 /* ============================================================
- *             EVENT: INTERACTION (Verify button + Apply buttons + Accept/Reject)
+ *             EVENT: INTERACTION
  * ============================================================ */
 client.on(Events.InteractionCreate, async interaction => {
 
@@ -1021,7 +1110,6 @@ client.on(Events.InteractionCreate, async interaction => {
       const type = isMc ? 'Minecraft Staff' : 'Discord Staff';
       const questions = isMc ? APPLY_QUESTIONS_MC : APPLY_QUESTIONS_DISCORD;
 
-      // Prevent duplicate applications
       if (dmApplications.has(userId)) {
         return interaction.reply({
           embeds: [errE('❌ Already Applying', 'عندك application مفتوحة دابا. كمل الأسئلة فـ الخاص أو كتب `cancel` باش تلغيها.')],
@@ -1033,10 +1121,7 @@ client.on(Events.InteractionCreate, async interaction => {
         const dm = await interaction.user.createDM();
 
         dmApplications.set(userId, {
-          type,
-          step: 0,
-          answers: {},
-          questions,
+          type, step: 0, answers: {}, questions,
           guildId: interaction.guild.id,
           startedAt: Date.now()
         });
@@ -1198,29 +1283,25 @@ client.on('messageCreate', async message => {
   /* ============ DM HANDLING (Apply flow) ============ */
   if (!message.guild) {
     const userId = message.author.id;
-    if (!dmApplications.has(userId)) return; // not in an application
+    if (!dmApplications.has(userId)) return;
 
     const app = dmApplications.get(userId);
     const content = message.content.trim();
 
-    // Cancel
     if (content.toLowerCase() === 'cancel') {
       dmApplications.delete(userId);
-      return message.reply({ embeds: [infoE('❌ Cancelled', 'تلغى الـ application ديالك. تقدر تبدا من جديد بضغطة على الزر.')] }).catch(()=>{});
+      return message.reply({ embeds: [infoE('❌ Cancelled', 'تلغى الـ application ديالك.')] }).catch(()=>{});
     }
 
-    // Save answer
     const currentQ = app.questions[app.step];
     app.answers[currentQ.key] = content;
     app.step++;
 
-    // Done?
     if (app.step >= app.questions.length) {
       dmApplications.delete(userId);
 
       await message.reply({ embeds: [okE('✅ Application Sent!', 'شكراً! تم إرسال طلبك. الـ Staff غادي يراجعوه قريباً.')] }).catch(()=>{});
 
-      // Send to results channel
       const guild = client.guilds.cache.get(app.guildId);
       const resultsCh = guild?.channels.cache.get(APPLY_RESULTS_CHANNEL_ID)
                      || await guild?.channels.fetch(APPLY_RESULTS_CHANNEL_ID).catch(()=>null);
@@ -1261,7 +1342,6 @@ client.on('messageCreate', async message => {
       return;
     }
 
-    // Ask next question
     const nextQ = app.questions[app.step];
     await message.reply({ embeds: [
       new EmbedBuilder()
