@@ -1,14 +1,21 @@
-{
-  "name": "khobza-smp-bot",
-  "version": "1.0.0",
-  "main": "index.js",
-  "type": "commonjs",
-  "scripts": { "start": "node index.js" },
-  "engines": { "node": ">=20.0.0" },
-  "dependencies": {
-    "@discordjs/voice": "^0.17.0",
-    "discord.js": "^14.15.3",
-    "dotenv": "^16.4.5",
-    "libsodium-wrappers": "^0.7.13"
-  }
-}
+DISCORD_TOKEN=
+PREFIX=!
+GUILD_ID=
+WELCOME_CHANNEL_ID=1558168781677924383
+WELCOME_IMAGE=
+ROLE_LOG_CHANNEL_ID=1557761485961171085
+MUTE_LOG_CHANNEL_ID=1558158698805723226
+BAN_LOG_CHANNEL_ID=1558158791659229354
+KICK_LOG_CHANNEL_ID=
+GENERAL_LOG_CHANNEL_ID=
+MC_SERVER_IP=play.khobzasmp.com
+MC_STORE_URL=https://store.khobzasmp.com
+DATA_DIR=/data
+
+VERIFY_CHANNEL_ID=1558503393226530947
+VERIFY_IMAGE=
+UNVERIFIED_ROLE_ID=1557761141575262298
+VERIFIED_ROLE_ID=1557761111242051704
+
+APPLY_STAFF_CHANNEL_ID=1557761363617521724
+APPLY_RESULTS_CHANNEL_ID=1558583636025147505
