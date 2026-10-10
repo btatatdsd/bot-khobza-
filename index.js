@@ -6,8 +6,7 @@ require('dotenv').config();
 const {
   Client, GatewayIntentBits, Partials, EmbedBuilder,
   PermissionFlagsBits, ChannelType, ActivityType, AuditLogEvent,
-  ActionRowBuilder, ButtonBuilder, ButtonStyle, Events,
-  ModalBuilder, TextInputBuilder, TextInputStyle
+  ActionRowBuilder, ButtonBuilder, ButtonStyle, Events
 } = require('discord.js');
 const { joinVoiceChannel, getVoiceConnection, VoiceConnectionStatus, entersState } = require('@discordjs/voice');
 const fs = require('fs');
@@ -54,6 +53,25 @@ const client = new Client({
 
 const C = { ok: 0x57f287, err: 0xed4245, info: 0x5865f2, warn: 0xfee75c };
 
+/* ===================== APPLY QUESTIONS ===================== */
+const APPLY_QUESTIONS_MC = [
+  { key: 'mc_username',      label: 'Minecraft Username',   q: 'What is your Minecraft username?' },
+  { key: 'discord_username', label: 'Discord Username',     q: 'What is your Discord username?' },
+  { key: 'age',              label: 'Age',                  q: 'How old are you?' },
+  { key: 'tz_country',       label: 'Timezone & Country',   q: 'What is your time zone and country?' },
+  { key: 'position',         label: 'Staff Position',       q: 'Which staff position are you applying for? (Helper, Moderator, Admin)' },
+  { key: 'playtime',         label: 'Minecraft Playtime',   q: 'How long have you been playing Minecraft?' }
+];
+
+const APPLY_QUESTIONS_DISCORD = [
+  { key: 'mc_username',      label: 'Minecraft Username',   q: 'What is your Minecraft username?' },
+  { key: 'discord_username', label: 'Discord Username',     q: 'What is your Discord username?' },
+  { key: 'age',              label: 'Age',                  q: 'How old are you?' },
+  { key: 'tz_country',       label: 'Timezone & Country',   q: 'What is your time zone and country?' },
+  { key: 'position',         label: 'Staff Position',       q: 'Which staff position are you applying for? (Helper, Moderator, Admin)' },
+  { key: 'playtime',         label: 'Minecraft Playtime',   q: 'How long have you been playing Minecraft?' }
+];
+
 /* ===================== STORES ===================== */
 const warnings = new Map();
 const afks     = new Map();
@@ -61,7 +79,8 @@ const economy  = new Map();
 const settings = { antispam: false, antiinvite: false, antiraid: false, antimention: false, automod: false, logs: '' };
 const spamMap  = new Map();
 const joinLog  = [];
-const applications = new Map();
+const applications  = new Map();  // msgId -> { userId, type, answers }
+const dmApplications = new Map(); // userId -> { type, step, answers, guildId, questions }
 
 /* ===================== HELPERS ===================== */
 const em = (color, title, desc) => {
@@ -236,7 +255,7 @@ commands.verifypanel = { cat: 'Verify', desc: 'Send verification panel', async r
   m.reply({ embeds: [okE('✅ Panel sent', `In ${ch}`)] }).catch(()=>{});
 }};
 
-/* ---------- APPLY STAFF PANEL (interactive image) ---------- */
+/* ---------- APPLY STAFF PANEL ---------- */
 commands.applypanel = { cat: 'Verify', desc: 'Send apply staff panel (with optional image)', usage: 'applypanel [imageURL]', async run(m, a) {
   if (!has(m.member, PermissionFlagsBits.Administrator)) return m.reply({ embeds: [errE('❌ Admin only.')] });
 
@@ -245,53 +264,42 @@ commands.applypanel = { cat: 'Verify', desc: 'Send apply staff panel (with optio
 
   let imageURL = (a[0] || '').trim();
 
-  // Check replied message
   if (!imageURL && m.reference?.messageId) {
     const replied = await m.channel.messages.fetch(m.reference.messageId).catch(()=>null);
     if (replied) {
       if (replied.attachments.size) imageURL = replied.attachments.first().url;
       else {
-        const urlMatch = replied.content.match(/https?:\/\/\S+\.(?:png|jpe?g|gif|webp)(?:\?\S+)?/i);
+        const urlMatch = replied.content.match(/https?:\/\/\S+/i);
         if (urlMatch) imageURL = urlMatch[0];
       }
     }
   }
-
-  // Check own attachments
   if (!imageURL && m.attachments.size) imageURL = m.attachments.first().url;
 
-  // Interactive: ask user
   if (!imageURL) {
-    await m.reply({ embeds: [infoE('🖼️ أرسل رابط الصورة', 'صيفط رابط الصورة (URL) هنا فهاد الروم، أو ارفع صورة، أو كتب `cancel` لإلغاء.\nعندك **60 ثانية**.')] });
-
+    await m.reply({ embeds: [infoE('🖼️ أرسل رابط الصورة', 'صيفط رابط الصورة (URL)، أو ارفع صورة، أو كتب `cancel` لإلغاء.\nعندك **60 ثانية**.')] });
     const filter = x => x.author.id === m.author.id && x.channel.id === m.channel.id;
     try {
-      const collected = await m.channel.awaitMessages({ filter, max: 1, time: 60000, errors: ['time'] });
-      const replyMsg = collected.first();
-
-      if (replyMsg.content.toLowerCase().trim() === 'cancel') {
-        return m.reply({ embeds: [infoE('❌ Cancelled.')] });
-      }
-
-      if (replyMsg.attachments.size) {
-        imageURL = replyMsg.attachments.first().url;
-      } else {
+      const coll = await m.channel.awaitMessages({ filter, max: 1, time: 60000, errors: ['time'] });
+      const replyMsg = coll.first();
+      if (replyMsg.content.toLowerCase().trim() === 'cancel') return m.reply({ embeds: [infoE('❌ Cancelled.')] });
+      if (replyMsg.attachments.size) imageURL = replyMsg.attachments.first().url;
+      else {
         const urlMatch = replyMsg.content.match(/https?:\/\/\S+/i);
         if (urlMatch) imageURL = urlMatch[0];
       }
-
       replyMsg.delete().catch(()=>{});
-
-      if (!imageURL) {
-        return m.reply({ embeds: [errE('❌ No valid URL found.', 'رجع جرب وعطيني رابط صحيح.')] });
-      }
+      if (!imageURL) return m.reply({ embeds: [errE('❌ No valid URL found.')] });
     } catch {
-      return m.reply({ embeds: [errE('⏰ Timed out.', 'ما عطيتيش رابط الصورة. جرب عاود.')] });
+      return m.reply({ embeds: [errE('⏰ Timed out.')] });
     }
   }
 
+  // Clean URL: strip trailing characters
+  imageURL = imageURL.trim().replace(/[>),]+$/, '');
+
   if (!/^https?:\/\//i.test(imageURL)) {
-    return m.reply({ embeds: [errE('❌ Invalid URL.', `الرابط: \`${imageURL.slice(0, 100)}\``)] });
+    return m.reply({ embeds: [errE('❌ Invalid URL.', `\`${imageURL.slice(0, 100)}\``)] });
   }
 
   const embed = new EmbedBuilder()
@@ -302,7 +310,11 @@ commands.applypanel = { cat: 'Verify', desc: 'Send apply staff panel (with optio
       'اختار النوع اللي بغيتي تقدم عليه:\n\n' +
       '🎮 **Apply Staff Minecraft** — Staff داخل السيرفر\n' +
       '💬 **Apply Staff Discord** — Staff فـ الديسكورد\n\n' +
-      'كليكي على الزر المناسب وغادي تفتح ليك استمارة. جاوب بصدق وكامل الأسئلة.'
+      '**كيفاش كيخدم؟**\n' +
+      '1. كليكي على الزر المناسب.\n' +
+      '2. البوت غادي يصيفط ليك DM بالأسئلة.\n' +
+      '3. جاوب على كل الأسئلة فـ الخاص.\n' +
+      '4. الـ Staff غادي يراجع طلبك.'
     )
     .setFooter({ text: '𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 • Applications' })
     .setTimestamp()
@@ -317,6 +329,7 @@ commands.applypanel = { cat: 'Verify', desc: 'Send apply staff panel (with optio
     await ch.send({ embeds: [embed], components: [row] });
     m.reply({ embeds: [okE('✅ Panel sent', `In ${ch}\n**Image:** ${imageURL}`)] }).catch(()=>{});
   } catch (e) {
+    console.error('[APPLYPANEL] send error:', e);
     m.reply({ embeds: [errE('❌ Failed to send', e.message)] });
   }
 }};
@@ -972,7 +985,7 @@ client.on('guildMemberAdd', async member => {
 });
 
 /* ============================================================
- *             EVENT: INTERACTION
+ *             EVENT: INTERACTION (Verify button + Apply buttons + Accept/Reject)
  * ============================================================ */
 client.on(Events.InteractionCreate, async interaction => {
 
@@ -1001,28 +1014,59 @@ client.on(Events.InteractionCreate, async interaction => {
       return;
     }
 
-    /* --- Apply: Minecraft --- */
-    if (id === 'apply_minecraft') {
-      const modal = new ModalBuilder().setCustomId('modal_apply_minecraft').setTitle('Apply Staff Minecraft');
-      modal.addComponents(
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('q_level').setLabel('شنو مستواك في اللعبة؟').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(200)),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('q_age').setLabel('شحال عمرك فالحقيقة؟').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(50)),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('q_exp').setLabel('شنو هي خبرتك؟').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(1000)),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('q_prev').setLabel('واش كنتي staff فسيرفر آخر؟').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(200))
-      );
-      return interaction.showModal(modal).catch(e => console.error('[MODAL]', e));
-    }
+    /* --- Apply: Start DM conversation --- */
+    if (id === 'apply_minecraft' || id === 'apply_discord') {
+      const userId = interaction.user.id;
+      const isMc = id === 'apply_minecraft';
+      const type = isMc ? 'Minecraft Staff' : 'Discord Staff';
+      const questions = isMc ? APPLY_QUESTIONS_MC : APPLY_QUESTIONS_DISCORD;
 
-    /* --- Apply: Discord --- */
-    if (id === 'apply_discord') {
-      const modal = new ModalBuilder().setCustomId('modal_apply_discord').setTitle('Apply Staff Discord');
-      modal.addComponents(
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('q_why').setLabel('علاش بغيتي تكون staff فالديسكورد؟').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(1000)),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('q_age').setLabel('شحال عمرك فالحقيقة؟').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(50)),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('q_exp').setLabel('شنو هي خبرتك فالديسكورد؟').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(1000)),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('q_prev').setLabel('واش كنتي staff فسيرفر آخر؟').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(200))
-      );
-      return interaction.showModal(modal).catch(e => console.error('[MODAL]', e));
+      // Prevent duplicate applications
+      if (dmApplications.has(userId)) {
+        return interaction.reply({
+          embeds: [errE('❌ Already Applying', 'عندك application مفتوحة دابا. كمل الأسئلة فـ الخاص أو كتب `cancel` باش تلغيها.')],
+          ephemeral: true
+        });
+      }
+
+      try {
+        const dm = await interaction.user.createDM();
+
+        dmApplications.set(userId, {
+          type,
+          step: 0,
+          answers: {},
+          questions,
+          guildId: interaction.guild.id,
+          startedAt: Date.now()
+        });
+
+        await interaction.reply({ embeds: [okE('📩 DM Sent', 'تحقق من الـ DMs ديالك باش تبدا الأسئلة!')], ephemeral: true });
+
+        const first = questions[0];
+        await dm.send({ embeds: [
+          new EmbedBuilder()
+            .setColor(C.info)
+            .setTitle(`📝 Application — ${type}`)
+            .setDescription(
+              `مرحبا <@${userId}>! غادي نسولك **${questions.length}** أسئلة.\n` +
+              `جاوب على كل سؤال بصدق.\n\n` +
+              `اكتب \`cancel\` فـ أي وقت باش تلغي.\n\n` +
+              `**Q1/${questions.length}:** ${first.q}`
+            )
+            .setFooter({ text: '𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 • Applications' })
+            .setTimestamp()
+        ] });
+        console.log(`[APPLY] 📩 DM started for ${interaction.user.tag} (${type})`);
+      } catch (e) {
+        console.error('[APPLY] DM failed:', e.message);
+        dmApplications.delete(userId);
+        return interaction.reply({
+          embeds: [errE('❌ Cannot DM you', 'خاصك تفتح الـ DMs من إعدادات السيرفر باش نقدر نسولك.\nSettings → Privacy & Safety → Allow DMs from server members.')],
+          ephemeral: true
+        });
+      }
+      return;
     }
 
     /* --- Accept --- */
@@ -1033,7 +1077,10 @@ client.on(Events.InteractionCreate, async interaction => {
       const userId = id.replace('apply_accept_', '');
       try {
         const user = await client.users.fetch(userId).catch(()=>null);
-        if (user) await user.send({ embeds: [okE('🎉 Congratulations!', `**تم قبولك فـ Staff 𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷!**\n\nYour application has been **accepted**. A staff member will contact you soon.\n\nWelcome to the team! 🎊`)] }).catch(e => console.warn('[DM]', e.message));
+        if (user) {
+          await user.send({ embeds: [okE('🎉 Congratulations!', `**تم قبولك فـ Staff 𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷!**\n\nYour application has been **accepted**.\n\nWelcome to the team! 🎊`)] })
+            .catch(e => console.warn('[DM] Cannot DM user:', e.message));
+        }
         const data = applications.get(interaction.message.id);
         const e = okE('✅ Application Accepted').addFields(
           { name: 'Applicant', value: `<@${userId}> (\`${userId}\`)` },
@@ -1057,7 +1104,10 @@ client.on(Events.InteractionCreate, async interaction => {
       const userId = id.replace('apply_reject_', '');
       try {
         const user = await client.users.fetch(userId).catch(()=>null);
-        if (user) await user.send({ embeds: [errE('❌ Application Result', `**للأسف، تم رفض طلبك.**\n\nYour application has been **rejected**. You can apply again later.\n\nبالتوفيق فالمستقبل! 💪`)] }).catch(e => console.warn('[DM]', e.message));
+        if (user) {
+          await user.send({ embeds: [errE('❌ Application Result', `**للأسف، تم رفض طلبك.**\n\nYour application has been **rejected**. You can apply again later.\n\nبالتوفيق فالمستقبل! 💪`)] })
+            .catch(e => console.warn('[DM]', e.message));
+        }
         const e = errE('❌ Application Rejected').addFields(
           { name: 'Applicant', value: `<@${userId}> (\`${userId}\`)` },
           { name: 'Reviewed by', value: `${interaction.user.tag}` });
@@ -1065,70 +1115,6 @@ client.on(Events.InteractionCreate, async interaction => {
         try { await interaction.message.edit({ components: [] }); } catch {}
       } catch (e) {
         console.error('[REJECT] ❌', e);
-        if (!interaction.replied && !interaction.deferred)
-          interaction.reply({ embeds: [errE('❌ Error', e.message)], ephemeral: true }).catch(()=>{});
-      }
-      return;
-    }
-  }
-
-  /* ============ MODALS ============ */
-  if (interaction.isModalSubmit()) {
-    const id = interaction.customId;
-
-    if (id === 'modal_apply_minecraft' || id === 'modal_apply_discord') {
-      try {
-        const isMc = id === 'modal_apply_minecraft';
-        const type = isMc ? 'Minecraft Staff' : 'Discord Staff';
-
-        const answers = isMc
-          ? {
-              'Level in game': interaction.fields.getTextInputValue('q_level'),
-              'Age': interaction.fields.getTextInputValue('q_age'),
-              'Experience': interaction.fields.getTextInputValue('q_exp'),
-              'Previous staff': interaction.fields.getTextInputValue('q_prev')
-            }
-          : {
-              'Why staff?': interaction.fields.getTextInputValue('q_why'),
-              'Age': interaction.fields.getTextInputValue('q_age'),
-              'Discord experience': interaction.fields.getTextInputValue('q_exp'),
-              'Previous staff': interaction.fields.getTextInputValue('q_prev')
-            };
-
-        await interaction.reply({ embeds: [okE('✅ Application Sent!', 'تم إرسال طلبك بنجاح. غادي يتشاف من طرف الـ Staff.')], ephemeral: true });
-
-        const resultsCh = interaction.guild.channels.cache.get(APPLY_RESULTS_CHANNEL_ID)
-                       || await interaction.guild.channels.fetch(APPLY_RESULTS_CHANNEL_ID).catch(()=>null);
-
-        if (!resultsCh || !resultsCh.isTextBased()) {
-          console.error('[APPLY] ❌ Results channel not found');
-          return;
-        }
-
-        const embed = new EmbedBuilder()
-          .setColor(isMc ? C.ok : C.info)
-          .setTitle(`📝 New Application — ${type}`)
-          .setDescription(`**Applicant:** <@${interaction.user.id}> (\`${interaction.user.id}\`)\n**Username:** \`${interaction.user.tag}\``)
-          .setThumbnail(interaction.user.displayAvatarURL({ size: 256 }))
-          .setFooter({ text: 'Use buttons below to Accept or Reject' })
-          .setTimestamp();
-
-        for (const [k, v] of Object.entries(answers)) {
-          embed.addFields({ name: k, value: `\`\`\`${String(v).slice(0, 1000) || '(empty)'}\`\`\`` });
-        }
-
-        const row = new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId(`apply_accept_${interaction.user.id}`).setLabel('Accept').setEmoji('✅').setStyle(ButtonStyle.Success),
-          new ButtonBuilder().setCustomId(`apply_reject_${interaction.user.id}`).setLabel('Reject').setEmoji('❌').setStyle(ButtonStyle.Danger)
-        );
-
-        const msg = await resultsCh.send({ embeds: [embed], components: [row] }).catch(e => { console.error('[APPLY] send failed:', e.message); return null; });
-        if (msg) {
-          applications.set(msg.id, { userId: interaction.user.id, type, answers });
-          console.log(`[APPLY] ✅ Application from ${interaction.user.tag} (${type}) sent.`);
-        }
-      } catch (e) {
-        console.error('[MODAL] ❌', e);
         if (!interaction.replied && !interaction.deferred)
           interaction.reply({ embeds: [errE('❌ Error', e.message)], ephemeral: true }).catch(()=>{});
       }
@@ -1204,11 +1190,91 @@ client.on('channelCreate', ch => { if (ch.guild) sendLog(ch.guild, settings.logs
 client.on('channelDelete', ch => { if (ch.guild) sendLog(ch.guild, settings.logs || GENERAL_LOG_CHANNEL_ID, errE('🗑️ Deleted', `${ch.name} (${ch.id})`)); });
 
 /* ============================================================
- *             EVENT: MESSAGE CREATE
+ *             EVENT: MESSAGE CREATE (DM + Guild)
  * ============================================================ */
 client.on('messageCreate', async message => {
-  if (!message.guild || message.author.bot) return;
+  if (message.author.bot) return;
 
+  /* ============ DM HANDLING (Apply flow) ============ */
+  if (!message.guild) {
+    const userId = message.author.id;
+    if (!dmApplications.has(userId)) return; // not in an application
+
+    const app = dmApplications.get(userId);
+    const content = message.content.trim();
+
+    // Cancel
+    if (content.toLowerCase() === 'cancel') {
+      dmApplications.delete(userId);
+      return message.reply({ embeds: [infoE('❌ Cancelled', 'تلغى الـ application ديالك. تقدر تبدا من جديد بضغطة على الزر.')] }).catch(()=>{});
+    }
+
+    // Save answer
+    const currentQ = app.questions[app.step];
+    app.answers[currentQ.key] = content;
+    app.step++;
+
+    // Done?
+    if (app.step >= app.questions.length) {
+      dmApplications.delete(userId);
+
+      await message.reply({ embeds: [okE('✅ Application Sent!', 'شكراً! تم إرسال طلبك. الـ Staff غادي يراجعوه قريباً.')] }).catch(()=>{});
+
+      // Send to results channel
+      const guild = client.guilds.cache.get(app.guildId);
+      const resultsCh = guild?.channels.cache.get(APPLY_RESULTS_CHANNEL_ID)
+                     || await guild?.channels.fetch(APPLY_RESULTS_CHANNEL_ID).catch(()=>null);
+
+      if (!resultsCh || !resultsCh.isTextBased()) {
+        console.error('[APPLY] ❌ Results channel not found');
+        return;
+      }
+
+      const isMc = app.type === 'Minecraft Staff';
+      const embed = new EmbedBuilder()
+        .setColor(isMc ? C.ok : C.info)
+        .setTitle(`📝 New Application — ${app.type}`)
+        .setDescription(
+          `**Applicant:** <@${userId}> (\`${userId}\`)\n` +
+          `**Username:** \`${message.author.tag}\`\n` +
+          `**Submitted:** <t:${Math.floor(Date.now()/1000)}:R>`
+        )
+        .setThumbnail(message.author.displayAvatarURL({ size: 256 }))
+        .setFooter({ text: 'Use buttons below to Accept or Reject' })
+        .setTimestamp();
+
+      for (const q of app.questions) {
+        const val = app.answers[q.key] || '(empty)';
+        embed.addFields({ name: q.label, value: `\`\`\`${String(val).slice(0, 1000)}\`\`\`` });
+      }
+
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`apply_accept_${userId}`).setLabel('Accept').setEmoji('✅').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId(`apply_reject_${userId}`).setLabel('Reject').setEmoji('❌').setStyle(ButtonStyle.Danger)
+      );
+
+      const msg = await resultsCh.send({ content: `<@&${VERIFIED_ROLE_ID}>`, embeds: [embed], components: [row] }).catch(e => { console.error('[APPLY] send failed:', e.message); return null; });
+      if (msg) {
+        applications.set(msg.id, { userId, type: app.type, answers: app.answers });
+        console.log(`[APPLY] ✅ Application from ${message.author.tag} (${app.type}) sent.`);
+      }
+      return;
+    }
+
+    // Ask next question
+    const nextQ = app.questions[app.step];
+    await message.reply({ embeds: [
+      new EmbedBuilder()
+        .setColor(C.info)
+        .setTitle(`Q${app.step + 1}/${app.questions.length}`)
+        .setDescription(nextQ.q)
+        .setFooter({ text: `Type "cancel" to abort` })
+        .setTimestamp()
+    ] }).catch(()=>{});
+    return;
+  }
+
+  /* ============ GUILD MESSAGE HANDLING ============ */
   if (afks.has(message.author.id) && !message.content.startsWith(PREFIX + 'afk')) {
     afks.delete(message.author.id);
     message.reply({ embeds: [okE('👋 Welcome back', 'AFK removed.')] }).then(x => setTimeout(() => x.delete().catch(()=>{}), 5000)).catch(()=>{});
