@@ -1,7 +1,7 @@
 /* ============================================================
  *  𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 Discord Bot — Full Version
- *  - ANY link (youtube, tiktok, discord.gg, etc.) → DELETED
- *  - Bot invite links → DELETED + "lah yn3l tbon mok" warning
+ *  - ANY link posted by ANYONE → DELETED
+ *  - Bot replies with BIG message: "ry7 t9wd lah yn3l tbon mok"
  *  - Only !link whitelisted users can bypass
  *  - Even Owner/Admin cannot bypass
  * ============================================================ */
@@ -158,34 +158,13 @@ if (!linkWhitelist.users) linkWhitelist.users = {};
 const isLinkWhitelisted = id => !!linkWhitelist.users[id];
 
 /* ============================================================
- *  LINK DETECTION
+ *  LINK DETECTION — catches ANY URL
  * ============================================================ */
-
-/* Bot invite link patterns */
-const BOT_INVITE_PATTERNS = [
-  /discord(?:app)?\.com\/(?:oauth2|api\/oauth2)\/authorize\?[^\s]*?(?:scope=bot|client_id=\d+)/i,
-  /discord(?:app)?\.com\/oauth2\/authorize\?[^\s]*?permissions=\d+/i,
-  /top\.gg\/bot\/\d+/i,
-  /discord\.me\/oauth2\/authorize\?[^\s]*?scope=bot/i,
-  /discordbotlist\.com\/bot\/\d+/i,
-  /discord\.com\/api\/oauth2\/authorize/i
-];
-
-/* General URL pattern — catches ANY link */
-const GENERAL_URL_PATTERN = /https?:\/\/[^\s<>]+/i;
-
-function containsBotInviteLink(content) {
-  if (!content) return null;
-  for (const rx of BOT_INVITE_PATTERNS) {
-    const m = content.match(rx);
-    if (m) return m[0];
-  }
-  return null;
-}
+const ANY_URL_PATTERN = /(https?:\/\/[^\s<>]+)|(www\.[^\s<>]+\.[a-z]{2,}[^\s<>]*)|((?:discord\.gg|discord\.com\/invite)\/[^\s<>]+)/i;
 
 function containsAnyLink(content) {
   if (!content) return null;
-  const m = content.match(GENERAL_URL_PATTERN);
+  const m = content.match(ANY_URL_PATTERN);
   return m ? m[0] : null;
 }
 
@@ -499,9 +478,7 @@ commands.link = {
       '**Usage:**\n' +
       '`!link add <@user|userID> <code>` — Whitelist a user (can post any link)\n' +
       '`!link remove <@user|userID>` — Remove from whitelist\n' +
-      '`!link list` — Show all whitelisted users\n\n' +
-      '**Note:** Any link (YouTube, TikTok, Discord invites, etc.) will be deleted by default.\n' +
-      'Only whitelisted users can bypass this filter.')] });
+      '`!link list` — Show all whitelisted users')] });
   }
 };
 
@@ -1117,7 +1094,7 @@ client.once('ready', async () => {
   console.log(`[READY] Staff roles: ${STAFF_ROLES.length}`);
   console.log(`[READY] Link-whitelist: ${Object.keys(linkWhitelist.users).length} user(s)`);
   console.log(`[READY] Bot-whitelist: ${Object.keys(botWhitelist.bots).length} bot(s)`);
-  console.log(`[READY] ANY link → DELETED | Bot invite → DELETED + warning`);
+  console.log(`[READY] ANY link → DELETED + "ry7 t9wd lah yn3l tbon mok"`);
   for (const [, guild] of client.guilds.cache) {
     console.log(`[READY] Guild: ${guild.name}`);
     for (const r of STAFF_ROLES) {
@@ -1392,65 +1369,48 @@ client.on('messageCreate', async message => {
   }
 
   /* ============================================================
-   *  ⚠️ ANTI-LINK PROTECTION — EVERY LINK IS DELETED
-   *  - Bot invite links → deleted + "lah yn3l tbon mok" warning
-   *  - Any other link (YouTube, TikTok, discord.gg, etc.) → deleted silently
-   *  - Only users in the !link whitelist can bypass this filter
-   *  - Even Owner / Administrator cannot bypass (unless whitelisted)
+   *  ⚠️ ANTI-LINK PROTECTION — ANY LINK IS DELETED
+   *  Reply: "ry7 t9wd lah yn3l tbon mok" (BIG)
+   *  Only !link whitelisted users can bypass.
+   *  Even Owner / Administrator cannot bypass.
    * ============================================================ */
   if (!isLinkWhitelisted(message.author.id)) {
-    const botLink = containsBotInviteLink(message.content);
-    const anyLink = containsAnyLink(message.content);
+    const linkFound = containsAnyLink(message.content);
 
-    if (botLink) {
-      /* Bot invite link detected — delete + big warning */
+    if (linkFound) {
+      /* Delete the message immediately */
       await message.delete().catch(() => {});
 
+      /* Send the big warning embed */
       const warning = new EmbedBuilder()
         .setColor(0xff0000)
-        .setTitle('# lah yn3l tbon mok')
+        .setTitle('# ry7 t9wd lah yn3l tbon mok')
         .setDescription(
-          `# lah yn3l tbon mok\n\n` +
-          `**${message.author}** — راك تحاول تصيفط رابط بوت. هادشي ممنوع فالسيرفر! 🚫\n\n` +
-          `> إلا بغيتي صلاحية تصيفط روابط، تواصل مع الإدارة باش يزيدوك فـ الـ whitelist.`
+          `# ry7 t9wd lah yn3l tbon mok\n\n` +
+          `## ${message.author} — الروابط ممنوعة فالسيرفر! 🚫\n\n` +
+          `> إلا بغيتي صلاحية تصيفط روابط، خاصك تكون فـ الـ whitelist.\n` +
+          `> تواصل مع الإدارة باش يزيدوك.\n\n` +
+          `**Link detected:**\n\`\`\`${linkFound.slice(0, 100)}\`\`\``
         )
         .setThumbnail(message.author.displayAvatarURL({ size: 256 }))
-        .setFooter({ text: 'Khobza SMP • Anti Bot-Link Protection' })
+        .setFooter({ text: '𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 • Anti-Link Protection' })
         .setTimestamp();
 
+      /* Send as a normal message with the author mentioned */
       message.channel.send({ content: `<@${message.author.id}>`, embeds: [warning] })
-        .then(msg => setTimeout(() => msg.delete().catch(()=>{}), 10000))
+        .then(msg => setTimeout(() => msg.delete().catch(()=>{}), 15000))
         .catch(() => {});
 
-      if (GENERAL_LOG_CHANNEL_ID) {
-        sendLog(message.guild, GENERAL_LOG_CHANNEL_ID,
-          errE('🚫 Bot Invite Link Blocked').addFields(
-            { name: 'User', value: `${message.author.tag} (\`${message.author.id}\`)`, inline: true },
-            { name: 'Channel', value: `${message.channel}`, inline: true },
-            { name: 'Link', value: `\`${botLink.slice(0, 100)}\``, inline: false }
-          ));
-      }
-      console.log(`[ANTI-LINK] Blocked bot invite from ${message.author.tag}: ${botLink.slice(0, 80)}`);
-      return;
-    }
-
-    if (anyLink) {
-      /* Any other link — delete silently */
-      await message.delete().catch(() => {});
-
-      message.channel.send({ content: `<@${message.author.id}> 🚫 **الروابط ممنوعة فالسيرفر.**` })
-        .then(msg => setTimeout(() => msg.delete().catch(()=>{}), 5000))
-        .catch(() => {});
-
+      /* Log */
       if (GENERAL_LOG_CHANNEL_ID) {
         sendLog(message.guild, GENERAL_LOG_CHANNEL_ID,
           errE('🚫 Link Blocked').addFields(
             { name: 'User', value: `${message.author.tag} (\`${message.author.id}\`)`, inline: true },
             { name: 'Channel', value: `${message.channel}`, inline: true },
-            { name: 'Link', value: `\`${anyLink.slice(0, 100)}\``, inline: false }
+            { name: 'Link', value: `\`${linkFound.slice(0, 100)}\``, inline: false }
           ));
       }
-      console.log(`[ANTI-LINK] Blocked link from ${message.author.tag}: ${anyLink.slice(0, 80)}`);
+      console.log(`[ANTI-LINK] Blocked link from ${message.author.tag}: ${linkFound.slice(0, 80)}`);
       return;
     }
   }
