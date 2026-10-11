@@ -1,9 +1,9 @@
 /* ============================================================
  *  𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 Discord Bot — Full Version
- *  - Regular Discord invites (discord.gg/...) → ALLOWED (everyone)
- *  - Bot invite links (oauth2/authorize?scope=bot) → BLOCKED
- *  - Anti unauthorized bot (auto-ban if not whitelisted)
- *  - Role names auto-fetched live from Discord
+ *  - ANY link (youtube, tiktok, discord.gg, etc.) → DELETED
+ *  - Bot invite links → DELETED + "lah yn3l tbon mok" warning
+ *  - Only !link whitelisted users can bypass
+ *  - Even Owner/Admin cannot bypass
  * ============================================================ */
 require('dotenv').config();
 
@@ -91,14 +91,14 @@ const APPLY_QUESTIONS = [
 const warnings = new Map();
 const afks     = new Map();
 const economy  = new Map();
-const settings = { antispam: false, antiinvite: false, antiraid: false, antimention: false, automod: false };
+const settings = { antispam: false, antiraid: false, antimention: false, automod: false };
 const spamMap  = new Map();
 const joinLog  = [];
 const applications   = new Map();
 const dmApplications = new Map();
 
 /* ============================================================
- *  STAFF TIER SYSTEM (names fetched live from Discord)
+ *  STAFF TIER SYSTEM
  * ============================================================ */
 const STAFF_ROLES = [
   { id: HELPER_ROLE_ID,  rank: 1, maxMute: 10,  minMute: 5, canMove: false, canTimeout: false, canNickname: false, canBan: false, canKick: false, canGiveaway: false, label: 'Helper' },
@@ -158,18 +158,21 @@ if (!linkWhitelist.users) linkWhitelist.users = {};
 const isLinkWhitelisted = id => !!linkWhitelist.users[id];
 
 /* ============================================================
- *  BOT INVITE LINK DETECTION
- *  Only detects links that add a BOT to a server.
- *  Regular server invites (discord.gg/xxx) are NOT detected.
+ *  LINK DETECTION
  * ============================================================ */
+
+/* Bot invite link patterns */
 const BOT_INVITE_PATTERNS = [
-  /discord(?:app)?\.com\/(?:oauth2|api\/oauth2)\/authorize\?[^\s]*?(?:scope=bot|scope=bot%20|client_id=\d+)/i,
+  /discord(?:app)?\.com\/(?:oauth2|api\/oauth2)\/authorize\?[^\s]*?(?:scope=bot|client_id=\d+)/i,
   /discord(?:app)?\.com\/oauth2\/authorize\?[^\s]*?permissions=\d+/i,
   /top\.gg\/bot\/\d+/i,
   /discord\.me\/oauth2\/authorize\?[^\s]*?scope=bot/i,
   /discordbotlist\.com\/bot\/\d+/i,
   /discord\.com\/api\/oauth2\/authorize/i
 ];
+
+/* General URL pattern — catches ANY link */
+const GENERAL_URL_PATTERN = /https?:\/\/[^\s<>]+/i;
 
 function containsBotInviteLink(content) {
   if (!content) return null;
@@ -178,6 +181,12 @@ function containsBotInviteLink(content) {
     if (m) return m[0];
   }
   return null;
+}
+
+function containsAnyLink(content) {
+  if (!content) return null;
+  const m = content.match(GENERAL_URL_PATTERN);
+  return m ? m[0] : null;
 }
 
 /* ============================================================
@@ -421,13 +430,10 @@ const commands = {};
 
 /* ============================================================
  *  !link — Manage link-whitelist
- *  !link add <@user|id> <code>
- *  !link remove <@user|id>
- *  !link list
  * ============================================================ */
 commands.link = {
   cat: 'Security',
-  desc: 'Manage link-whitelist (bypass bot-link filter)',
+  desc: 'Manage link-whitelist (bypass link filter)',
   usage: 'link <add|remove|list> [@user|userID] [code]',
   async run(m, a) {
     const tier = getStaffTier(m.member);
@@ -491,11 +497,11 @@ commands.link = {
 
     m.reply({ embeds: [infoE('🔗 Link Whitelist',
       '**Usage:**\n' +
-      '`!link add <@user|userID> <code>` — Whitelist a user (bypass bot-link filter)\n' +
+      '`!link add <@user|userID> <code>` — Whitelist a user (can post any link)\n' +
       '`!link remove <@user|userID>` — Remove from whitelist\n' +
       '`!link list` — Show all whitelisted users\n\n' +
-      '**Note:** Regular Discord invites (`discord.gg/...`) are ALWAYS allowed.\n' +
-      'This whitelist is only for bypassing the **bot invite link** filter.')] });
+      '**Note:** Any link (YouTube, TikTok, Discord invites, etc.) will be deleted by default.\n' +
+      'Only whitelisted users can bypass this filter.')] });
   }
 };
 
@@ -1111,7 +1117,7 @@ client.once('ready', async () => {
   console.log(`[READY] Staff roles: ${STAFF_ROLES.length}`);
   console.log(`[READY] Link-whitelist: ${Object.keys(linkWhitelist.users).length} user(s)`);
   console.log(`[READY] Bot-whitelist: ${Object.keys(botWhitelist.bots).length} bot(s)`);
-  console.log(`[READY] Regular invites: ✅ ALLOWED | Bot invites: ❌ BLOCKED`);
+  console.log(`[READY] ANY link → DELETED | Bot invite → DELETED + warning`);
   for (const [, guild] of client.guilds.cache) {
     console.log(`[READY] Guild: ${guild.name}`);
     for (const r of STAFF_ROLES) {
@@ -1127,7 +1133,7 @@ client.once('ready', async () => {
 });
 
 /* ============================================================
- *  EVENT: MEMBER JOIN — Anti-bot + Welcome
+ *  EVENT: MEMBER JOIN
  * ============================================================ */
 client.on('guildMemberAdd', async member => {
   console.log(`[JOIN] ➕ ${member.user.tag} (${member.id}) — Bot: ${member.user.bot}`);
@@ -1386,14 +1392,18 @@ client.on('messageCreate', async message => {
   }
 
   /* ============================================================
-   *  ⚠️ ANTI BOT-INVITE-LINK PROTECTION
-   *  - Regular Discord invites (discord.gg/...) → ALWAYS ALLOWED
-   *  - Bot invite links (oauth2/authorize?scope=bot) → BLOCKED
-   *  - Even Owner/Admin can't bypass (unless in !link whitelist)
+   *  ⚠️ ANTI-LINK PROTECTION — EVERY LINK IS DELETED
+   *  - Bot invite links → deleted + "lah yn3l tbon mok" warning
+   *  - Any other link (YouTube, TikTok, discord.gg, etc.) → deleted silently
+   *  - Only users in the !link whitelist can bypass this filter
+   *  - Even Owner / Administrator cannot bypass (unless whitelisted)
    * ============================================================ */
   if (!isLinkWhitelisted(message.author.id)) {
     const botLink = containsBotInviteLink(message.content);
+    const anyLink = containsAnyLink(message.content);
+
     if (botLink) {
+      /* Bot invite link detected — delete + big warning */
       await message.delete().catch(() => {});
 
       const warning = new EmbedBuilder()
@@ -1402,7 +1412,7 @@ client.on('messageCreate', async message => {
         .setDescription(
           `# lah yn3l tbon mok\n\n` +
           `**${message.author}** — راك تحاول تصيفط رابط بوت. هادشي ممنوع فالسيرفر! 🚫\n\n` +
-          `> إلا بغيتي صلاحية تصيفط روابط بوت، تواصل مع الإدارة باش يزيدوك فـ الـ whitelist.`
+          `> إلا بغيتي صلاحية تصيفط روابط، تواصل مع الإدارة باش يزيدوك فـ الـ whitelist.`
         )
         .setThumbnail(message.author.displayAvatarURL({ size: 256 }))
         .setFooter({ text: 'Khobza SMP • Anti Bot-Link Protection' })
@@ -1421,6 +1431,26 @@ client.on('messageCreate', async message => {
           ));
       }
       console.log(`[ANTI-LINK] Blocked bot invite from ${message.author.tag}: ${botLink.slice(0, 80)}`);
+      return;
+    }
+
+    if (anyLink) {
+      /* Any other link — delete silently */
+      await message.delete().catch(() => {});
+
+      message.channel.send({ content: `<@${message.author.id}> 🚫 **الروابط ممنوعة فالسيرفر.**` })
+        .then(msg => setTimeout(() => msg.delete().catch(()=>{}), 5000))
+        .catch(() => {});
+
+      if (GENERAL_LOG_CHANNEL_ID) {
+        sendLog(message.guild, GENERAL_LOG_CHANNEL_ID,
+          errE('🚫 Link Blocked').addFields(
+            { name: 'User', value: `${message.author.tag} (\`${message.author.id}\`)`, inline: true },
+            { name: 'Channel', value: `${message.channel}`, inline: true },
+            { name: 'Link', value: `\`${anyLink.slice(0, 100)}\``, inline: false }
+          ));
+      }
+      console.log(`[ANTI-LINK] Blocked link from ${message.author.tag}: ${anyLink.slice(0, 80)}`);
       return;
     }
   }
@@ -1446,17 +1476,6 @@ client.on('messageCreate', async message => {
       message.channel.send({ embeds: [errE('🛡️ Anti-spam', `${message.author} timed out 1m.`)] }).catch(()=>{});
     }
   }
-
-  /* ============================================================
-   *  ⚠️ NOTE: Regular Discord invites (discord.gg/...) are ALLOWED.
-   *  The anti-invite check has been DISABLED so that anyone (including
-   *  the server owner) can post regular server invite links freely.
-   *
-   *  Only BOT invite links are still blocked — see the check above.
-   * ============================================================ */
-  // if (settings.antiinvite && !has(message.member, PermissionFlagsBits.ManageMessages) && /(discord\.gg|discord\.com\/invite)\//i.test(message.content))
-  //   message.delete().catch(()=>{});
-
   if (settings.antimention && !has(message.member, PermissionFlagsBits.ManageMessages) && message.mentions.users.size >= 5)
     message.delete().catch(()=>{});
   if (settings.automod && !has(message.member, PermissionFlagsBits.ManageMessages)) {
