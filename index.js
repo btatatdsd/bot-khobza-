@@ -1,5 +1,6 @@
 /* ============================================================
  *  𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 Discord Bot
+ *  Auto-fetches role names from Discord so no code edits needed
  * ============================================================ */
 require('dotenv').config();
 
@@ -41,7 +42,7 @@ const VERIFIED_ROLE_ID         = process.env.VERIFIED_ROLE_ID || '15577611112420
 const APPLY_STAFF_CHANNEL_ID   = process.env.APPLY_STAFF_CHANNEL_ID || '1557761363617521724';
 const APPLY_RESULTS_CHANNEL_ID = process.env.APPLY_RESULTS_CHANNEL_ID || '1558583636025147505';
 
-/* === Staff Roles === */
+/* === Staff Role IDs (only IDs here — names come from Discord live) === */
 const HELPER_ROLE_ID  = process.env.HELPER_ROLE_ID  || '1557761089163231432';
 const MOD_ROLE_ID     = process.env.MOD_ROLE_ID     || '1557761087380652043';
 const ADMIN_ROLE_ID   = process.env.ADMIN_ROLE_ID   || '1557761086147666011';
@@ -51,7 +52,6 @@ const HEAD_ROLE_ID    = process.env.HEAD_ROLE_ID    || '1557761065545240587';
 const COOWNER_ROLE_ID = process.env.COOWNER_ROLE_ID || '1557761063452156034';
 const OWNER_ROLE_ID   = process.env.OWNER_ROLE_ID   || '1557761062013763655';
 
-/* === Bot protection === */
 const BOT_WHITELIST_CODE = process.env.BOT_WHITELIST_CODE || '1235';
 
 if (!TOKEN) { console.error('[FATAL] DISCORD_TOKEN missing.'); process.exit(1); }
@@ -96,6 +96,8 @@ const dmApplications = new Map();
 
 /* ============================================================
  *  STAFF TIER SYSTEM
+ *  - The `label` field is a FALLBACK only.
+ *  - Real name is fetched live from Discord via getRoleName().
  * ============================================================ */
 const STAFF_ROLES = [
   { id: HELPER_ROLE_ID,  rank: 1, maxMute: 10,  minMute: 5, canMove: false, canTimeout: false, canNickname: false, canBan: false, canKick: false, canGiveaway: false, label: 'Helper' },
@@ -108,29 +110,33 @@ const STAFF_ROLES = [
   { id: OWNER_ROLE_ID,   rank: 8, maxMute: -1,  minMute: 5, canMove: true,  canTimeout: true,  canNickname: true,  canBan: true,  canKick: true,  canGiveaway: true,  label: 'Owner' }
 ];
 
+/* Get the LIVE role name from Discord (falls back to label if not found) */
+function getRoleName(guild, staffData) {
+  if (!guild || !staffData) return staffData?.label || 'Unknown';
+  const role = guild.roles.cache.get(staffData.id);
+  return role ? role.name : staffData.label;
+}
+
 function getStaffTier(member) {
   if (!member) return null;
+  const guild = member.guild;
+
   if (member.permissions.has(PermissionFlagsBits.Administrator)) {
-    return { ...STAFF_ROLES[STAFF_ROLES.length - 1], isAdminPerm: true };
+    const top = STAFF_ROLES[STAFF_ROLES.length - 1];
+    return { ...top, label: getRoleName(guild, top), isAdminPerm: true };
   }
+
   let best = null;
   for (const r of STAFF_ROLES) {
     if (member.roles.cache.has(r.id)) {
       if (!best || r.rank > best.rank) best = r;
     }
   }
-  return best;
+  if (!best) return null;
+  return { ...best, label: getRoleName(guild, best) };
 }
 
 /* ===================== BOT WHITELIST STORAGE ===================== */
-/**
- * bot-whitelist.json:
- * {
- *   "bots": {
- *     "<botUserId>": { addedBy: "tag", addedAt: timestamp, note: "..." }
- *   }
- * }
- */
 function loadBotWhitelist() {
   try { if (fs.existsSync(BOTWL_CFG_FILE)) return JSON.parse(fs.readFileSync(BOTWL_CFG_FILE, 'utf8')); }
   catch (e) { console.error('[BOTWL] load:', e.message); }
@@ -145,9 +151,7 @@ function saveBotWhitelist(data) {
 const botWhitelist = loadBotWhitelist();
 if (!botWhitelist.bots) botWhitelist.bots = {};
 
-function isBotWhitelisted(userId) {
-  return !!botWhitelist.bots[userId];
-}
+function isBotWhitelisted(userId) { return !!botWhitelist.bots[userId]; }
 
 /* ===================== VOICE MUTE STORAGE ===================== */
 function loadMuteConfig() {
@@ -467,159 +471,99 @@ async function sendWelcome(guild, member) {
 const commands = {};
 
 /* ============================================================
- *  ⭐ !wyh <botUserId> — Whitelist a bot (asks for code via modal)
+ *  !wyh — Whitelist a bot
  * ============================================================ */
-commands.wyh = {
-  cat: 'Security',
-  desc: 'Whitelist a bot so it won\'t be auto-banned',
-  usage: 'wyh <botUserId>',
-  async run(m, a) {
-    const tier = getStaffTier(m.member);
-    if (!tier || tier.rank < 3) return m.reply({ embeds: [errE('❌ No permission (Admin+).')] });
+commands.wyh = { cat: 'Security', desc: 'Whitelist a bot', usage: 'wyh <botUserId>', async run(m, a) {
+  const tier = getStaffTier(m.member);
+  if (!tier || tier.rank < 3) return m.reply({ embeds: [errE('❌ No permission (Admin+).')] });
 
-    const targetId = (a[0] || '').replace(/[<@!>]/g, '').trim();
-    if (!targetId || !/^\d{17,20}$/.test(targetId)) {
-      return m.reply({ embeds: [errE('❌ Provide a valid bot user ID.', 'Usage: `!wyh <botUserId>`')] });
-    }
+  const targetId = (a[0] || '').replace(/[<@!>]/g, '').trim();
+  if (!targetId || !/^\d{17,20}$/.test(targetId)) return m.reply({ embeds: [errE('❌ Provide a valid bot user ID.', 'Usage: `!wyh <botUserId>`')] });
 
-    // Check if it's actually a bot
-    const user = await client.users.fetch(targetId).catch(()=>null);
-    if (!user) return m.reply({ embeds: [errE('❌ User not found on Discord.')] });
-    if (!user.bot) return m.reply({ embeds: [errE('❌ This user is not a bot.', 'هاد الـ ID ماشي ديال بوت. الـ whitelist غير للبوتات.')] });
+  const user = await client.users.fetch(targetId).catch(()=>null);
+  if (!user) return m.reply({ embeds: [errE('❌ User not found on Discord.')] });
+  if (!user.bot) return m.reply({ embeds: [errE('❌ This user is not a bot.')] });
 
-    // Open modal for code
-    const modal = new ModalBuilder()
-      .setCustomId(`wyh_modal_${targetId}`)
-      .setTitle('Bot Whitelist — Enter Code');
+  const modal = new ModalBuilder()
+    .setCustomId(`wyh_modal_${targetId}`)
+    .setTitle('Bot Whitelist — Enter Code');
 
-    modal.addComponents(
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId('wyh_code')
-          .setLabel('Security Code')
-          .setStyle(TextInputStyle.Short)
-          .setRequired(true)
-          .setMinLength(4)
-          .setMaxLength(20)
-          .setPlaceholder('Enter the security code...')
-      )
-    );
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('wyh_code').setLabel('Security Code').setStyle(TextInputStyle.Short).setRequired(true).setMinLength(4).setMaxLength(20).setPlaceholder('Enter the security code...')
+    )
+  );
+  return m.showModal(modal).catch(e => console.error('[WYH] modal:', e));
+}};
 
-    return m.showModal(modal).catch(e => console.error('[WYH] modal:', e));
-  }
-};
+commands.unwyh = { cat: 'Security', desc: 'Remove a bot from whitelist', usage: 'unwyh <botUserId>', async run(m, a) {
+  const tier = getStaffTier(m.member);
+  if (!tier || tier.rank < 3) return m.reply({ embeds: [errE('❌ No permission (Admin+).')] });
+
+  const targetId = (a[0] || '').replace(/[<@!>]/g, '').trim();
+  if (!targetId || !/^\d{17,20}$/.test(targetId)) return m.reply({ embeds: [errE('Usage: `!unwyh <botUserId>`')] });
+  if (!isBotWhitelisted(targetId)) return m.reply({ embeds: [errE('❌ هاد البوت ماشي فـ الـ whitelist.')] });
+
+  delete botWhitelist.bots[targetId];
+  saveBotWhitelist(botWhitelist);
+
+  const e = okE('🗑️ Bot Removed from Whitelist').addFields(
+    { name: 'Bot ID', value: `\`${targetId}\``, inline: true },
+    { name: 'By', value: `${m.author.tag} (${tier.label})`, inline: true }
+  );
+  m.reply({ embeds: [e] });
+  sendLog(m.guild, BAN_LOG_CHANNEL_ID, e);
+}};
+
+commands.wyhlist = { cat: 'Security', desc: 'List whitelisted bots', async run(m) {
+  const tier = getStaffTier(m.member);
+  if (!tier || tier.rank < 2) return m.reply({ embeds: [errE('❌ No permission.')] });
+
+  const entries = Object.entries(botWhitelist.bots);
+  if (!entries.length) return m.reply({ embeds: [infoE('🤖 Whitelisted Bots', 'ما كاين حتى بوت فـ الـ whitelist.')] });
+
+  const list = entries.map(([id, data], i) =>
+    `**#${i+1}** <@${id}> (\`${id}\`)\n  *Added by ${data.addedBy} • <t:${Math.floor(data.addedAt/1000)}:R>*`
+  ).join('\n');
+  m.reply({ embeds: [infoE(`🤖 Whitelisted Bots (${entries.length})`).setDescription(list.slice(0, 4000))] });
+}};
 
 /* ============================================================
- *  !unwyh <botUserId> — Remove a bot from whitelist
+ *  !giveaway
  * ============================================================ */
-commands.unwyh = {
-  cat: 'Security',
-  desc: 'Remove a bot from the whitelist',
-  usage: 'unwyh <botUserId>',
-  async run(m, a) {
-    const tier = getStaffTier(m.member);
-    if (!tier || tier.rank < 3) return m.reply({ embeds: [errE('❌ No permission (Admin+).')] });
+commands.giveaway = { cat: 'Fun', desc: 'Start a giveaway', usage: 'giveaway <time> <winners> <prize...> [imageURL]', async run(m, a) {
+  const tier = getStaffTier(m.member);
+  if (!tier || !tier.canGiveaway) return m.reply({ embeds: [errE('❌ No permission (Moderator+).')] });
 
-    const targetId = (a[0] || '').replace(/[<@!>]/g, '').trim();
-    if (!targetId || !/^\d{17,20}$/.test(targetId)) return m.reply({ embeds: [errE('Usage: `!unwyh <botUserId>`')] });
+  if (a.length < 3) return m.reply({ embeds: [errE('📖 Usage', '`!giveaway <time> <winners> <prize> [imageURL]`\n\n**Examples:**\n`!giveaway 10m 1 Nitro`\n`!giveaway 1h 3 $50 Gift Card`\n`!giveaway 1d 1 Rank https://i.imgur.com/xxx.png`\n\n**Time:** `s` `m` `h` `d` `w`')] });
 
-    if (!isBotWhitelisted(targetId)) return m.reply({ embeds: [errE('❌ هاد البوت ماشي فـ الـ whitelist.')] });
+  const durationMs = parseDuration(a[0]);
+  if (!durationMs) return m.reply({ embeds: [errE('❌ Time format invalid.', 'Use: `10m`, `1h`, `1d`, `1w`')] });
 
-    delete botWhitelist.bots[targetId];
-    saveBotWhitelist(botWhitelist);
+  const winners = parseInt(a[1], 10);
+  if (isNaN(winners) || winners < 1 || winners > 50) return m.reply({ embeds: [errE('❌ Winners 1-50.')] });
 
-    const e = okE('🗑️ Bot Removed from Whitelist').addFields(
-      { name: 'Bot ID', value: `\`${targetId}\``, inline: true },
-      { name: 'By', value: `${m.author.tag} (${tier.label})`, inline: true }
-    );
-    m.reply({ embeds: [e] });
-    sendLog(m.guild, BAN_LOG_CHANNEL_ID, e);
-  }
-};
+  let rest = a.slice(2);
+  let imageURL = '';
+  if (rest.length > 1 && /^https?:\/\/\S+/i.test(rest[rest.length - 1])) imageURL = rest.pop();
+  if (!imageURL && m.attachments.size) imageURL = m.attachments.first().url;
 
-/* ============================================================
- *  !wyhlist — Show whitelisted bots
- * ============================================================ */
-commands.wyhlist = {
-  cat: 'Security',
-  desc: 'List all whitelisted bots',
-  async run(m) {
-    const tier = getStaffTier(m.member);
-    if (!tier || tier.rank < 2) return m.reply({ embeds: [errE('❌ No permission.')] });
+  const prize = rest.join(' ').trim();
+  if (!prize) return m.reply({ embeds: [errE('❌ Provide a prize.')] });
 
-    const entries = Object.entries(botWhitelist.bots);
-    if (!entries.length) return m.reply({ embeds: [infoE('🤖 Whitelisted Bots', 'ما كاين حتى بوت فـ الـ whitelist.')] });
+  const gw = { guildId: m.guild.id, channelId: m.channel.id, hostId: m.author.id, prize, winners, imageURL, endsAt: Date.now() + durationMs, ended: false, entries: [], winnerIds: [] };
 
-    const list = entries.map(([id, data], i) =>
-      `**#${i+1}** <@${id}> (\`${id}\`)\n  *Added by ${data.addedBy} • <t:${Math.floor(data.addedAt/1000)}:R>*`
-    ).join('\n');
+  let msg;
+  try { msg = await m.channel.send({ embeds: [buildGiveawayEmbed(gw, false)] }); await msg.react('🎉'); }
+  catch (e) { return m.reply({ embeds: [errE('❌ Failed', e.message)] }); }
 
-    const e = infoE(`🤖 Whitelisted Bots (${entries.length})`).setDescription(list.slice(0, 4000));
-    m.reply({ embeds: [e] });
-  }
-};
+  activeGiveaways[msg.id] = gw;
+  saveGiveawayConfig(activeGiveaways);
+  const timer = setTimeout(() => endGiveaway(msg.id).catch(()=>{}), durationMs);
+  giveawayTimers.set(msg.id, timer);
 
-/* ============================================================
- *  ⭐ !giveaway — Advanced Giveaway
- * ============================================================ */
-commands.giveaway = {
-  cat: 'Fun',
-  desc: 'Start a giveaway',
-  usage: 'giveaway <time> <winners> <prize...> [imageURL]',
-  async run(m, a) {
-    const tier = getStaffTier(m.member);
-    if (!tier || !tier.canGiveaway) return m.reply({ embeds: [errE('❌ No permission (Moderator+).')] });
-
-    if (a.length < 3) {
-      return m.reply({ embeds: [
-        errE('📖 Usage',
-          '`!giveaway <time> <winners> <prize> [imageURL]`\n\n' +
-          '**Examples:**\n' +
-          '`!giveaway 10m 1 Nitro`\n' +
-          '`!giveaway 1h 3 $50 Gift Card`\n' +
-          '`!giveaway 1d 1 Rank https://i.imgur.com/xxx.png`\n\n' +
-          '**Time:** `s` `m` `h` `d` `w`'
-        )
-      ] });
-    }
-
-    const durationMs = parseDuration(a[0]);
-    if (!durationMs) return m.reply({ embeds: [errE('❌ Time format invalid.', 'Use: `10m`, `1h`, `1d`, `1w`')] });
-
-    const winners = parseInt(a[1], 10);
-    if (isNaN(winners) || winners < 1 || winners > 50) return m.reply({ embeds: [errE('❌ Winners 1-50.')] });
-
-    let rest = a.slice(2);
-    let imageURL = '';
-    if (rest.length > 1 && /^https?:\/\/\S+/i.test(rest[rest.length - 1])) imageURL = rest.pop();
-    if (!imageURL && m.attachments.size) imageURL = m.attachments.first().url;
-
-    const prize = rest.join(' ').trim();
-    if (!prize) return m.reply({ embeds: [errE('❌ Provide a prize.')] });
-
-    const gw = {
-      guildId: m.guild.id, channelId: m.channel.id,
-      hostId: m.author.id, prize, winners, imageURL,
-      endsAt: Date.now() + durationMs,
-      ended: false, entries: [], winnerIds: []
-    };
-
-    let msg;
-    try {
-      msg = await m.channel.send({ embeds: [buildGiveawayEmbed(gw, false)] });
-      await msg.react('🎉');
-    } catch (e) { return m.reply({ embeds: [errE('❌ Failed', e.message)] }); }
-
-    activeGiveaways[msg.id] = gw;
-    saveGiveawayConfig(activeGiveaways);
-    const timer = setTimeout(() => endGiveaway(msg.id).catch(()=>{}), durationMs);
-    giveawayTimers.set(msg.id, timer);
-
-    m.reply({ embeds: [okE('✅ Giveaway Started!', 
-      `**Prize:** ${prize}\n**Winners:** ${winners}\n**Ends in:** ${fmtDur(durationMs)}\n**Message ID:** \`${msg.id}\``
-    )] }).catch(()=>{});
-  }
-};
+  m.reply({ embeds: [okE('✅ Giveaway Started!', `**Prize:** ${prize}\n**Winners:** ${winners}\n**Ends in:** ${fmtDur(durationMs)}\n**Message ID:** \`${msg.id}\``)] }).catch(()=>{});
+}};
 
 commands.gend = { cat: 'Fun', desc: 'Force-end giveaway', usage: 'gend <messageID>', async run(m, a) {
   const tier = getStaffTier(m.member);
@@ -671,12 +615,7 @@ commands.verifypanel = { cat: 'Verify', desc: 'Send verification panel', async r
   const embed = new EmbedBuilder()
     .setColor(0x2b2d31)
     .setTitle('✅ Verification')
-    .setDescription(
-      '**مرحبا بيك فـ 𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷!**\n\n' +
-      'باش توصل لجميع الرومات، خاصك تدير التحقق.\n' +
-      'كليكي على الزر تحت باش تأخذ الـ Verified role.\n\n' +
-      '**Welcome to 𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷!**'
-    )
+    .setDescription('**مرحبا بيك فـ 𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷!**\n\nباش توصل لجميع الرومات، خاصك تدير التحقق.\nكليكي على الزر تحت باش تأخذ الـ Verified role.\n\n**Welcome to 𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷!**')
     .setFooter({ text: '𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 • Verification System' })
     .setTimestamp();
   if (VERIFY_IMAGE) embed.setImage(VERIFY_IMAGE);
@@ -724,15 +663,7 @@ commands.applypanel = { cat: 'Verify', desc: 'Send apply staff panel', usage: 'a
   const embed = new EmbedBuilder()
     .setColor(0x5865f2)
     .setTitle('📝 Apply for Staff — 𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷')
-    .setDescription(
-      '**بغيتي تولي Staff فـ 𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷؟**\n\n' +
-      '🎮 **Apply Staff Minecraft**\n' +
-      '💬 **Apply Staff Discord**\n\n' +
-      '**كيفاش كيخدم؟**\n' +
-      '1. كليكي على الزر.\n' +
-      '2. البوت غادي يصيفط ليك DM بالأسئلة.\n' +
-      '3. جاوب على كل الأسئلة فـ الخاص.'
-    )
+    .setDescription('**بغيتي تولي Staff فـ 𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷؟**\n\n🎮 **Apply Staff Minecraft**\n💬 **Apply Staff Discord**\n\n**كيفاش كيخدم؟**\n1. كليكي على الزر.\n2. البوت غادي يصيفط ليك DM بالأسئلة.\n3. جاوب على كل الأسئلة فـ الخاص.')
     .setFooter({ text: '𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 • Applications' })
     .setTimestamp()
     .setImage(imageURL);
@@ -748,22 +679,28 @@ commands.applypanel = { cat: 'Verify', desc: 'Send apply staff panel', usage: 'a
 }};
 
 /* ============================================================
- *  Staff Info
+ *  ⭐ Staff Info — LIVE names from Discord
  * ============================================================ */
 function buildStaffInfoEmbeds(guild) {
   const embeds = [];
+
   const header = new EmbedBuilder()
     .setColor(0x5865f2)
     .setTitle('🎖️ Staff Roles — 𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷')
-    .setDescription('جميع الرتب الإدارية • مرتبة من #1 (الأدنى) إلى #8 (الأعلى)')
-    .setFooter({ text: `Total: ${STAFF_ROLES.length} roles` })
+    .setDescription(
+      'جميع الرتب الإدارية مع **الأسماء** و**الـ IDs** و**الصلاحيات**.\n' +
+      'مرتبة من **الأدنى (#1)** إلى **الأعلى (#8)**.\n\n' +
+      '🔇 `Mute` • ➡️ `Move` • ⏳ `Timeout` • ✏️ `Nick` • 👢 `Kick` • 🔨 `Ban` • 🎁 `Giveaway`'
+    )
+    .setFooter({ text: `Total: ${STAFF_ROLES.length} roles • ${guild.name}` })
     .setTimestamp();
   embeds.push(header);
 
   const details = new EmbedBuilder().setColor(0x2b2d31).setTitle('📋 Roles Details');
+
   for (const r of STAFF_ROLES) {
     const realRole = guild.roles.cache.get(r.id);
-    const displayName = realRole ? realRole.name : r.label;
+    const displayName = realRole ? realRole.name : `${r.label} (not found)`;
     const maxMuteStr = r.maxMute === -1 ? '`Permanent`' : `\`${r.maxMute}m\``;
     const value =
       `**ID:** \`${r.id}\` • **Rank:** \`#${r.rank}\`\n` +
@@ -814,7 +751,7 @@ commands.roleinfo = { cat: 'Utility', desc: 'Role info (use "all")', usage: 'rol
     { name: 'Hoisted', value: r.hoist ? '✅' : '❌', inline: true }
   );
   if (staffData) e.addFields(
-    { name: '🎖️ Staff Rank', value: `#${staffData.rank} — ${staffData.label}`, inline: false },
+    { name: '🎖️ Staff Rank', value: `#${staffData.rank} — ${r.name}`, inline: false },
     { name: '🔇 Max Mute', value: fmtMinutes(staffData.maxMute), inline: true },
     { name: '➡️ Move', value: staffData.canMove ? '✅' : '❌', inline: true },
     { name: '⏳ Timeout', value: staffData.canTimeout ? '✅' : '❌', inline: true },
@@ -829,9 +766,7 @@ commands.roleinfo = { cat: 'Utility', desc: 'Role info (use "all")', usage: 'rol
 /* ---------- DIAGNOSTIC ---------- */
 commands.intents = { cat: 'Utility', desc: 'Check intents', async run(m) {
   if (!has(m.member, PermissionFlagsBits.Administrator)) return m.reply({ embeds: [errE('❌ Admin only.')] });
-  m.reply({ embeds: [infoE('🔍 Intents').setDescription(
-    `**Guilds**: ${client.guilds.cache.size}\n**Members**: ${m.guild.memberCount}\n**Cached**: ${m.guild.members.cache.size}\n\n**Members Intent**: ${m.guild.members.cache.size > 1 ? '✅ ON' : '❌ OFF'}`
-  )] });
+  m.reply({ embeds: [infoE('🔍 Intents').setDescription(`**Guilds**: ${client.guilds.cache.size}\n**Members**: ${m.guild.memberCount}\n**Cached**: ${m.guild.members.cache.size}\n\n**Members Intent**: ${m.guild.members.cache.size > 1 ? '✅ ON' : '❌ OFF'}`)] });
 }};
 commands.mytier = { cat: 'Utility', desc: 'Your staff tier', async run(m) {
   const t = getStaffTier(m.member);
@@ -906,7 +841,7 @@ commands.mute = { cat: 'Moderation', desc: 'Voice-mute', usage: 'mute <@user|use
     if (isNaN(minutes)) return m.reply({ embeds: [errE('❌ Invalid minutes.')] });
     if (minutes < tier.minMute) return m.reply({ embeds: [errE('❌ Too short.', `Min: **${tier.minMute}m**.`)] });
     if (tier.maxMute !== -1 && minutes > tier.maxMute) {
-      if (tier.rank === 1) return m.reply({ embeds: [errE('❌ mymknch aw9 rak 4a helper', 'Max Helper: **10 min**.')] });
+      if (tier.rank === 1) return m.reply({ embeds: [errE('❌ mymknch aw9 rak 4a helper', `Max ${tier.label}: **10 min**.`)] });
       return m.reply({ embeds: [errE(`❌ Max for ${tier.label}: **${fmtMinutes(tier.maxMute)}**.`)] });
     }
   }
@@ -1262,8 +1197,16 @@ client.once('ready', async () => {
   console.log(`[READY] Logged in as ${client.user.tag}`);
   console.log(`[READY] Guilds: ${client.guilds.cache.size}`);
   console.log(`[READY] Staff roles: ${STAFF_ROLES.length}`);
-  console.log(`[READY] Bot whitelist: ${Object.keys(botWhitelist.bots).length} bots`);
-  console.log(`[READY] Bot protection code set: ${BOT_WHITELIST_CODE ? '✅' : '❌'}`);
+
+  // Log live names from Discord
+  for (const [, guild] of client.guilds.cache) {
+    console.log(`[READY] === ${guild.name} ===`);
+    for (const r of STAFF_ROLES) {
+      const role = guild.roles.cache.get(r.id);
+      console.log(`[READY]  #${r.rank} → ${role ? role.name : '(NOT FOUND)'} [${r.id}]`);
+    }
+  }
+
   for (const [, guild] of client.guilds.cache) {
     const ch = guild.channels.cache.get(WELCOME_CHANNEL_ID);
     if (ch) {
@@ -1280,28 +1223,18 @@ client.once('ready', async () => {
 });
 
 /* ============================================================
- *  EVENT: MEMBER JOIN — Anti-bot protection + Welcome
+ *  EVENT: MEMBER JOIN — Anti-bot + Welcome
  * ============================================================ */
 client.on('guildMemberAdd', async member => {
   console.log(`[JOIN] ➕ ${member.user.tag} (${member.id}) — Bot: ${member.user.bot}`);
 
-  /* === ANTI-BOT: Auto-ban any bot that isn't whitelisted === */
   if (member.user.bot) {
-    // Don't ban self
     if (member.id === client.user.id) return;
-
-    if (isBotWhitelisted(member.id)) {
-      console.log(`[ANTI-BOT] ✅ Whitelisted bot joined: ${member.user.tag}`);
-      return;
-    }
+    if (isBotWhitelisted(member.id)) { console.log(`[ANTI-BOT] ✅ Whitelisted: ${member.user.tag}`); return; }
 
     console.log(`[ANTI-BOT] 🔨 Banning unauthorized bot: ${member.user.tag}`);
     try {
-      await member.ban({
-        reason: 'Unauthorized bot — Auto-ban by anti-bot system. Use !wyh to whitelist.',
-        deleteMessageSeconds: 3600
-      });
-
+      await member.ban({ reason: 'Unauthorized bot — Auto-ban by anti-bot system.', deleteMessageSeconds: 3600 });
       const e = errE('🔨 Unauthorized Bot Banned').addFields(
         { name: 'Bot', value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
         { name: 'Reason', value: 'Auto-ban (not whitelisted)', inline: true },
@@ -1309,19 +1242,15 @@ client.on('guildMemberAdd', async member => {
       );
       sendLog(member.guild, BAN_LOG_CHANNEL_ID, e);
     } catch (err) {
-      console.error(`[ANTI-BOT] ❌ Failed to ban ${member.user.tag}:`, err.message);
-      // Notify admins if ban failed
-      const e = errE('⚠️ Failed to Ban Bot').addFields(
+      console.error(`[ANTI-BOT] ❌ Failed to ban:`, err.message);
+      sendLog(member.guild, BAN_LOG_CHANNEL_ID, errE('⚠️ Failed to Ban Bot').addFields(
         { name: 'Bot', value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
-        { name: 'Error', value: err.message, inline: true },
-        { name: 'Action Needed', value: 'Manual ban required — check bot permissions', inline: false }
-      );
-      sendLog(member.guild, BAN_LOG_CHANNEL_ID, e);
+        { name: 'Error', value: err.message, inline: true }));
     }
-    return; // Don't send welcome to bots
+    return;
   }
 
-  /* === Regular member === */
+  /* Regular member */
   if (UNVERIFIED_ROLE_ID) {
     try { await member.roles.add(UNVERIFIED_ROLE_ID, 'Auto role on join'); }
     catch (e) { console.error(`[JOIN] ❌ unverified role:`, e.message); }
@@ -1340,50 +1269,24 @@ client.on('guildMemberAdd', async member => {
  * ============================================================ */
 client.on(Events.InteractionCreate, async interaction => {
 
-  /* ==================== MODAL SUBMIT ==================== */
   if (interaction.isModalSubmit()) {
     const id = interaction.customId;
-
-    /* --- WYH modal --- */
     if (id.startsWith('wyh_modal_')) {
       const targetId = id.replace('wyh_modal_', '');
       const code = interaction.fields.getTextInputValue('wyh_code').trim();
 
       if (code !== BOT_WHITELIST_CODE) {
-        return interaction.reply({
-          embeds: [errE('❌ Invalid Code', 'الكود اللي دخلتي ماشي صحيح.')],
-          ephemeral: true
-        });
+        return interaction.reply({ embeds: [errE('❌ Invalid Code', 'الكود ماشي صحيح.')], ephemeral: true });
       }
 
       const tier = getStaffTier(interaction.member);
-      if (!tier || tier.rank < 3) {
-        return interaction.reply({ embeds: [errE('❌ No permission (Admin+).')], ephemeral: true });
-      }
+      if (!tier || tier.rank < 3) return interaction.reply({ embeds: [errE('❌ No permission (Admin+).')], ephemeral: true });
 
-      // Verify target is a bot
       const user = await client.users.fetch(targetId).catch(()=>null);
-      if (!user || !user.bot) {
-        return interaction.reply({
-          embeds: [errE('❌ Not a Bot', 'الـ ID اللي عطيتي ماشي ديال بوت.')],
-          ephemeral: true
-        });
-      }
+      if (!user || !user.bot) return interaction.reply({ embeds: [errE('❌ Not a Bot')], ephemeral: true });
+      if (isBotWhitelisted(targetId)) return interaction.reply({ embeds: [infoE('ℹ️ Already Whitelisted')], ephemeral: true });
 
-      // Already whitelisted?
-      if (isBotWhitelisted(targetId)) {
-        return interaction.reply({
-          embeds: [infoE('ℹ️ Already Whitelisted', `<@${targetId}> ديجا فـ الـ whitelist.`)],
-          ephemeral: true
-        });
-      }
-
-      // Add to whitelist
-      botWhitelist.bots[targetId] = {
-        addedBy: interaction.user.tag,
-        addedById: interaction.user.id,
-        addedAt: Date.now()
-      };
+      botWhitelist.bots[targetId] = { addedBy: interaction.user.tag, addedById: interaction.user.id, addedAt: Date.now() };
       saveBotWhitelist(botWhitelist);
 
       const e = okE('✅ Bot Whitelisted').addFields(
@@ -1391,14 +1294,7 @@ client.on(Events.InteractionCreate, async interaction => {
         { name: 'By', value: `${interaction.user.tag} (${tier.label})`, inline: true }
       );
 
-      await interaction.reply({ embeds: [
-        okE('✅ Bot Whitelisted',
-          `**${user.tag}** (\`${targetId}\`) تمت إضافتو للـ whitelist.\n` +
-          `دابا إلا دخل السيرفر ما غاديش يتبان أوتوماتيكياً.`
-        )
-      ], ephemeral: true });
-
-      // Log it
+      await interaction.reply({ embeds: [okE('✅ Bot Whitelisted', `**${user.tag}** (\`${targetId}\`) تمت إضافتو للـ whitelist.`)], ephemeral: true });
       sendLog(interaction.guild, BAN_LOG_CHANNEL_ID, e);
       console.log(`[WYH] ✅ ${user.tag} (${targetId}) whitelisted by ${interaction.user.tag}`);
       return;
@@ -1406,7 +1302,6 @@ client.on(Events.InteractionCreate, async interaction => {
     return;
   }
 
-  /* ==================== BUTTONS ==================== */
   if (!interaction.isButton()) return;
   const btnId = interaction.customId;
 
@@ -1414,16 +1309,14 @@ client.on(Events.InteractionCreate, async interaction => {
     try {
       const guild = interaction.guild;
       const member = await guild.members.fetch(interaction.user.id);
-      if (member.roles.cache.has(VERIFIED_ROLE_ID))
-        return interaction.reply({ embeds: [infoE('ℹ️ Already Verified')], ephemeral: true });
+      if (member.roles.cache.has(VERIFIED_ROLE_ID)) return interaction.reply({ embeds: [infoE('ℹ️ Already Verified')], ephemeral: true });
       await member.roles.add(VERIFIED_ROLE_ID, 'Verified via button');
       if (UNVERIFIED_ROLE_ID && member.roles.cache.has(UNVERIFIED_ROLE_ID))
         await member.roles.remove(UNVERIFIED_ROLE_ID, 'Verified').catch(()=>{});
       await interaction.reply({ embeds: [okE('✅ Verified!', `مرحبا بيك!`)], ephemeral: true });
     } catch (e) {
       console.error('[VERIFY]', e);
-      if (!interaction.replied && !interaction.deferred)
-        interaction.reply({ embeds: [errE('❌ Error', e.message)], ephemeral: true }).catch(()=>{});
+      if (!interaction.replied && !interaction.deferred) interaction.reply({ embeds: [errE('❌ Error', e.message)], ephemeral: true }).catch(()=>{});
     }
     return;
   }
@@ -1434,8 +1327,7 @@ client.on(Events.InteractionCreate, async interaction => {
     const type = isMc ? 'Minecraft Staff' : 'Discord Staff';
     const questions = isMc ? APPLY_QUESTIONS_MC : APPLY_QUESTIONS_DISCORD;
 
-    if (dmApplications.has(userId))
-      return interaction.reply({ embeds: [errE('❌ Already Applying')], ephemeral: true });
+    if (dmApplications.has(userId)) return interaction.reply({ embeds: [errE('❌ Already Applying')], ephemeral: true });
 
     try {
       const dm = await interaction.user.createDM();
@@ -1492,7 +1384,6 @@ client.on('messageReactionAdd', async (reaction, user) => {
     if (user.bot) return;
     if (reaction.partial) await reaction.fetch().catch(()=>null);
     if (reaction.emoji.name !== '🎉') return;
-
     const gw = activeGiveaways[reaction.message.id];
     if (!gw || gw.ended) return;
     if (!gw.entries.includes(user.id)) {
@@ -1582,11 +1473,9 @@ client.on('guildBanAdd', async ban => {
 client.on('messageCreate', async message => {
   if (message.author.bot) return;
 
-  /* DM handling */
   if (!message.guild) {
     const userId = message.author.id;
     if (!dmApplications.has(userId)) return;
-
     const app = dmApplications.get(userId);
     const content = message.content.trim();
 
@@ -1601,7 +1490,6 @@ client.on('messageCreate', async message => {
     if (app.step >= app.questions.length) {
       dmApplications.delete(userId);
       await message.reply({ embeds: [okE('✅ Application Sent!')] }).catch(()=>{});
-
       const guild = client.guilds.cache.get(app.guildId);
       const resultsCh = guild?.channels.cache.get(APPLY_RESULTS_CHANNEL_ID);
       if (!resultsCh || !resultsCh.isTextBased()) return;
@@ -1638,7 +1526,6 @@ client.on('messageCreate', async message => {
     return;
   }
 
-  /* Guild handling */
   if (afks.has(message.author.id) && !message.content.startsWith(PREFIX + 'afk')) {
     afks.delete(message.author.id);
     message.reply({ embeds: [okE('👋 Welcome back', 'AFK removed.')] }).then(x => setTimeout(() => x.delete().catch(()=>{}), 5000)).catch(()=>{});
@@ -1659,10 +1546,8 @@ client.on('messageCreate', async message => {
       message.channel.send({ embeds: [errE('🛡️ Anti-spam', `${message.author} timed out 1m.`)] }).catch(()=>{});
     }
   }
-  if (settings.antiinvite && !has(message.member, PermissionFlagsBits.ManageMessages) && /(discord\.gg|discord\.com\/invite)\//i.test(message.content))
-    message.delete().catch(()=>{});
-  if (settings.antimention && !has(message.member, PermissionFlagsBits.ManageMessages) && message.mentions.users.size >= 5)
-    message.delete().catch(()=>{});
+  if (settings.antiinvite && !has(message.member, PermissionFlagsBits.ManageMessages) && /(discord\.gg|discord\.com\/invite)\//i.test(message.content)) message.delete().catch(()=>{});
+  if (settings.antimention && !has(message.member, PermissionFlagsBits.ManageMessages) && message.mentions.users.size >= 5) message.delete().catch(()=>{});
   if (settings.automod && !has(message.member, PermissionFlagsBits.ManageMessages)) {
     const bad = ['fuck','shit','bitch','كلب','زبي','قحبة'];
     if (bad.some(w => message.content.toLowerCase().includes(w))) message.delete().catch(()=>{});
@@ -1672,11 +1557,8 @@ client.on('messageCreate', async message => {
   const args = message.content.slice(PREFIX.length).trim().split(/\s+/);
   const name = args.shift().toLowerCase();
 
-  // Special multi-word: "roll all info" / "role all info"
-  if (name === 'roll' && args[0]?.toLowerCase() === 'all' && args[1]?.toLowerCase() === 'info')
-    return commands.staffinfo.run(message, []);
-  if (name === 'role' && args[0]?.toLowerCase() === 'all' && args[1]?.toLowerCase() === 'info')
-    return commands.staffinfo.run(message, []);
+  if (name === 'roll' && args[0]?.toLowerCase() === 'all' && args[1]?.toLowerCase() === 'info') return commands.staffinfo.run(message, []);
+  if (name === 'role' && args[0]?.toLowerCase() === 'all' && args[1]?.toLowerCase() === 'info') return commands.staffinfo.run(message, []);
 
   const cmd = commands[name];
   if (!cmd) return;
