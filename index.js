@@ -38,7 +38,7 @@ const VERIFIED_ROLE_ID         = process.env.VERIFIED_ROLE_ID || '15577611112420
 const APPLY_STAFF_CHANNEL_ID   = process.env.APPLY_STAFF_CHANNEL_ID || '1557761363617521724';
 const APPLY_RESULTS_CHANNEL_ID = process.env.APPLY_RESULTS_CHANNEL_ID || '1558583636025147505';
 
-/* === Staff Hierarchy (from lowest to highest) === */
+/* === Staff Roles === */
 const HELPER_ROLE_ID  = process.env.HELPER_ROLE_ID  || '1557761089163231432';
 const MOD_ROLE_ID     = process.env.MOD_ROLE_ID     || '1557761087380652043';
 const ADMIN_ROLE_ID   = process.env.ADMIN_ROLE_ID   || '1557761086147666011';
@@ -76,21 +76,13 @@ const APPLY_QUESTIONS_MC = [
   { key: 'position',         label: 'Staff Position',       q: 'Which staff position are you applying for? (Helper, Moderator, Admin)' },
   { key: 'playtime',         label: 'Minecraft Playtime',   q: 'How long have you been playing Minecraft?' }
 ];
-
-const APPLY_QUESTIONS_DISCORD = [
-  { key: 'mc_username',      label: 'Minecraft Username',   q: 'What is your Minecraft username?' },
-  { key: 'discord_username', label: 'Discord Username',     q: 'What is your Discord username?' },
-  { key: 'age',              label: 'Age',                  q: 'How old are you?' },
-  { key: 'tz_country',       label: 'Timezone & Country',   q: 'What is your time zone and country?' },
-  { key: 'position',         label: 'Staff Position',       q: 'Which staff position are you applying for? (Helper, Moderator, Admin)' },
-  { key: 'playtime',         label: 'Minecraft Playtime',   q: 'How long have you been playing Minecraft?' }
-];
+const APPLY_QUESTIONS_DISCORD = APPLY_QUESTIONS_MC;
 
 /* ===================== STORES ===================== */
 const warnings = new Map();
 const afks     = new Map();
 const economy  = new Map();
-const settings = { antispam: false, antiinvite: false, antiraid: false, antimention: false, automod: false, logs: '' };
+const settings = { antispam: false, antiinvite: false, antiraid: false, antimention: false, automod: false };
 const spamMap  = new Map();
 const joinLog  = [];
 const applications   = new Map();
@@ -98,31 +90,23 @@ const dmApplications = new Map();
 
 /* ============================================================
  *  STAFF TIER SYSTEM
- *  rank: higher = more power
- *  maxMute: in minutes (-1 = permanent)
- *  canMove / canTimeout / canNickname / canBan
  * ============================================================ */
 const STAFF_ROLES = [
-  { id: HELPER_ROLE_ID,  rank: 1, maxMute: 10,  minMute: 5, canMove: false, canTimeout: false, canNickname: false, canBan: false, label: 'Helper' },
-  { id: MOD_ROLE_ID,     rank: 2, maxMute: 10,  minMute: 5, canMove: true,  canTimeout: false, canNickname: false, canBan: false, label: 'Moderator' },
-  { id: ADMIN_ROLE_ID,   rank: 3, maxMute: 30,  minMute: 5, canMove: true,  canTimeout: false, canNickname: false, canBan: false, label: 'Admin' },
-  { id: SENIOR_ROLE_ID,  rank: 4, maxMute: 60,  minMute: 5, canMove: true,  canTimeout: false, canNickname: false, canBan: false, label: 'Senior' },
-  { id: MANAGER_ROLE_ID, rank: 5, maxMute: -1,  minMute: 5, canMove: true,  canTimeout: false, canNickname: false, canBan: false, label: 'Manager' },
-  { id: HEAD_ROLE_ID,    rank: 6, maxMute: -1,  minMute: 5, canMove: true,  canTimeout: true,  canNickname: false, canBan: false, label: 'Head Admin' },
-  { id: COOWNER_ROLE_ID, rank: 7, maxMute: -1,  minMute: 5, canMove: true,  canTimeout: true,  canNickname: true,  canBan: false, label: 'Co-Owner' },
-  { id: OWNER_ROLE_ID,   rank: 8, maxMute: -1,  minMute: 5, canMove: true,  canTimeout: true,  canNickname: true,  canBan: true,  label: 'Owner' }
+  { id: HELPER_ROLE_ID,  rank: 1, maxMute: 10,  minMute: 5, canMove: false, canTimeout: false, canNickname: false, canBan: false, canKick: false, label: 'Helper' },
+  { id: MOD_ROLE_ID,     rank: 2, maxMute: 10,  minMute: 5, canMove: true,  canTimeout: false, canNickname: false, canBan: false, canKick: false, label: 'Moderator' },
+  { id: ADMIN_ROLE_ID,   rank: 3, maxMute: 30,  minMute: 5, canMove: true,  canTimeout: false, canNickname: false, canBan: false, canKick: true,  label: 'Admin' },
+  { id: SENIOR_ROLE_ID,  rank: 4, maxMute: 60,  minMute: 5, canMove: true,  canTimeout: false, canNickname: false, canBan: false, canKick: true,  label: 'Senior' },
+  { id: MANAGER_ROLE_ID, rank: 5, maxMute: -1,  minMute: 5, canMove: true,  canTimeout: false, canNickname: false, canBan: false, canKick: true,  label: 'Manager' },
+  { id: HEAD_ROLE_ID,    rank: 6, maxMute: -1,  minMute: 5, canMove: true,  canTimeout: true,  canNickname: false, canBan: false, canKick: true,  label: 'Head Admin' },
+  { id: COOWNER_ROLE_ID, rank: 7, maxMute: -1,  minMute: 5, canMove: true,  canTimeout: true,  canNickname: true,  canBan: false, canKick: true,  label: 'Co-Owner' },
+  { id: OWNER_ROLE_ID,   rank: 8, maxMute: -1,  minMute: 5, canMove: true,  canTimeout: true,  canNickname: true,  canBan: true,  canKick: true,  label: 'Owner' }
 ];
 
 function getStaffTier(member) {
   if (!member) return null;
-
-  // Administrator permission = Owner level
   if (member.permissions.has(PermissionFlagsBits.Administrator)) {
-    const top = STAFF_ROLES[STAFF_ROLES.length - 1];
-    return { ...top, isAdminPerm: true };
+    return { ...STAFF_ROLES[STAFF_ROLES.length - 1], isAdminPerm: true };
   }
-
-  // Find highest rank role the member has
   let best = null;
   for (const r of STAFF_ROLES) {
     if (member.roles.cache.has(r.id)) {
@@ -151,7 +135,7 @@ function scheduleUnmute(key) {
   if (muteTimers.has(key)) { clearTimeout(muteTimers.get(key)); muteTimers.delete(key); }
   const data = activeMutes[key];
   if (!data) return;
-  if (data.permanent) return; // never auto-unmute
+  if (data.permanent) return;
   const delay = data.unmuteAt - Date.now();
   if (delay <= 0) { doUnmute(key).catch(()=>{}); return; }
   const t = setTimeout(() => doUnmute(key).catch(()=>{}), delay);
@@ -161,26 +145,20 @@ function scheduleUnmute(key) {
 async function doUnmute(key) {
   const data = activeMutes[key];
   if (!data) return;
-
   delete activeMutes[key];
   saveMuteConfig(activeMutes);
   if (muteTimers.has(key)) { clearTimeout(muteTimers.get(key)); muteTimers.delete(key); }
-
   try {
     const guild = client.guilds.cache.get(data.guildId);
     if (!guild) return;
     const member = await guild.members.fetch(data.userId).catch(()=>null);
     if (!member) return;
-    if (member.voice?.serverMute) {
-      await member.voice.setMute(false, 'Auto-unmute (duration expired)').catch(()=>{});
-    }
-    const e = okE('🔊 Auto Unmuted').addFields(
+    if (member.voice?.serverMute) await member.voice.setMute(false, 'Auto-unmute').catch(()=>{});
+    sendLog(guild, MUTE_LOG_CHANNEL_ID, okE('🔊 Auto Unmuted').addFields(
       { name: 'User', value: `<@${data.userId}>`, inline: true },
       { name: 'Reason', value: data.reason || '—', inline: true }
-    );
-    sendLog(guild, MUTE_LOG_CHANNEL_ID, e);
-    console.log(`[MUTE] Auto-unmuted ${data.userId}`);
-  } catch (e) { console.error('[MUTE] auto-unmute error:', e.message); }
+    ));
+  } catch (e) { console.error('[MUTE] auto-unmute:', e.message); }
 }
 
 async function restoreMutes() {
@@ -190,11 +168,10 @@ async function restoreMutes() {
       const guild = client.guilds.cache.get(data.guildId);
       if (!guild) continue;
       const member = await guild.members.fetch(data.userId).catch(()=>null);
-      if (member && member.voice?.channel && !member.voice.serverMute) {
-        await member.voice.setMute(true, 'Restoring mute after restart').catch(()=>{});
-      }
+      if (member && member.voice?.channel && !member.voice.serverMute)
+        await member.voice.setMute(true, 'Restoring mute').catch(()=>{});
       scheduleUnmute(key);
-    } catch (e) { console.error('[MUTE] restore error:', e.message); }
+    } catch (e) { console.error('[MUTE] restore:', e.message); }
   }
 }
 
@@ -233,8 +210,7 @@ function fmtDur(ms) {
 function fmtMinutes(mins) {
   if (mins === -1) return 'Permanent';
   if (mins < 60) return `${mins} min`;
-  const h = Math.floor(mins / 60);
-  const m = mins % 60;
+  const h = Math.floor(mins / 60), m = mins % 60;
   return m > 0 ? `${h}h ${m}m` : `${h}h`;
 }
 async function resolveMember(msg, str) {
@@ -280,8 +256,8 @@ async function connectToVoice(guild, channelId) {
     throw new Error('Target is not a voice channel.');
   const me = guild.members.me || (await guild.members.fetch(client.user.id));
   const perms = channel.permissionsFor(me);
-  if (!perms?.has(PermissionFlagsBits.Connect)) throw new Error('Missing **Connect** permission.');
-  if (!perms?.has(PermissionFlagsBits.Speak))   throw new Error('Missing **Speak** permission.');
+  if (!perms?.has(PermissionFlagsBits.Connect)) throw new Error('Missing **Connect**.');
+  if (!perms?.has(PermissionFlagsBits.Speak))   throw new Error('Missing **Speak**.');
   const existing = getVoiceConnection(guild.id);
   if (existing) { try { existing.destroy(); } catch {} }
   const connection = joinVoiceChannel({
@@ -362,23 +338,20 @@ commands.verifypanel = { cat: 'Verify', desc: 'Send verification panel', async r
       '**مرحبا بيك فـ 𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷!**\n\n' +
       'باش توصل لجميع الرومات، خاصك تدير التحقق.\n' +
       'كليكي على الزر تحت باش تأخذ الـ Verified role.\n\n' +
-      '**Welcome to 𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷!**\n' +
-      'Click the button below to verify and get access to all channels.'
+      '**Welcome to 𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷!**'
     )
     .setFooter({ text: '𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 • Verification System' })
     .setTimestamp();
-
   if (VERIFY_IMAGE) embed.setImage(VERIFY_IMAGE);
 
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('verify_button').setLabel('Verify').setEmoji('✅').setStyle(ButtonStyle.Success)
   );
-
   await ch.send({ embeds: [embed], components: [row] });
   m.reply({ embeds: [okE('✅ Panel sent', `In ${ch}`)] }).catch(()=>{});
 }};
 
-/* ---------- APPLY STAFF PANEL ---------- */
+/* ---------- APPLY PANEL ---------- */
 commands.applypanel = { cat: 'Verify', desc: 'Send apply staff panel', usage: 'applypanel [imageURL]', async run(m, a) {
   if (!has(m.member, PermissionFlagsBits.Administrator)) return m.reply({ embeds: [errE('❌ Admin only.')] });
   const ch = m.guild.channels.cache.get(APPLY_STAFF_CHANNEL_ID) || await m.guild.channels.fetch(APPLY_STAFF_CHANNEL_ID).catch(()=>null);
@@ -395,7 +368,7 @@ commands.applypanel = { cat: 'Verify', desc: 'Send apply staff panel', usage: 'a
   if (!imageURL && m.attachments.size) imageURL = m.attachments.first().url;
 
   if (!imageURL) {
-    await m.reply({ embeds: [infoE('🖼️ أرسل رابط الصورة', 'صيفط رابط الصورة (URL)، أو ارفع صورة، أو كتب `cancel` لإلغاء.\nعندك **60 ثانية**.')] });
+    await m.reply({ embeds: [infoE('🖼️ أرسل رابط الصورة', 'صيفط رابط الصورة، أو ارفع صورة، أو كتب `cancel`. عندك **60 ثانية**.')] });
     const filter = x => x.author.id === m.author.id && x.channel.id === m.channel.id;
     try {
       const coll = await m.channel.awaitMessages({ filter, max: 1, time: 60000, errors: ['time'] });
@@ -404,7 +377,7 @@ commands.applypanel = { cat: 'Verify', desc: 'Send apply staff panel', usage: 'a
       if (replyMsg.attachments.size) imageURL = replyMsg.attachments.first().url;
       else { const urlMatch = replyMsg.content.match(/https?:\/\/\S+/i); if (urlMatch) imageURL = urlMatch[0]; }
       replyMsg.delete().catch(()=>{});
-      if (!imageURL) return m.reply({ embeds: [errE('❌ No valid URL found.')] });
+      if (!imageURL) return m.reply({ embeds: [errE('❌ No valid URL.')] });
     } catch { return m.reply({ embeds: [errE('⏰ Timed out.')] }); }
   }
 
@@ -417,13 +390,12 @@ commands.applypanel = { cat: 'Verify', desc: 'Send apply staff panel', usage: 'a
     .setDescription(
       '**بغيتي تولي Staff فـ 𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷؟**\n\n' +
       'اختار النوع اللي بغيتي تقدم عليه:\n\n' +
-      '🎮 **Apply Staff Minecraft** — Staff داخل السيرفر\n' +
-      '💬 **Apply Staff Discord** — Staff فـ الديسكورد\n\n' +
+      '🎮 **Apply Staff Minecraft**\n' +
+      '💬 **Apply Staff Discord**\n\n' +
       '**كيفاش كيخدم؟**\n' +
-      '1. كليكي على الزر المناسب.\n' +
+      '1. كليكي على الزر.\n' +
       '2. البوت غادي يصيفط ليك DM بالأسئلة.\n' +
-      '3. جاوب على كل الأسئلة فـ الخاص.\n' +
-      '4. الـ Staff غادي يراجع طلبك.'
+      '3. جاوب على كل الأسئلة فـ الخاص.'
     )
     .setFooter({ text: '𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 • Applications' })
     .setTimestamp()
@@ -433,14 +405,139 @@ commands.applypanel = { cat: 'Verify', desc: 'Send apply staff panel', usage: 'a
     new ButtonBuilder().setCustomId('apply_minecraft').setLabel('Apply Staff Minecraft').setEmoji('🎮').setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId('apply_discord').setLabel('Apply Staff Discord').setEmoji('💬').setStyle(ButtonStyle.Primary)
   );
-
   try {
     await ch.send({ embeds: [embed], components: [row] });
     m.reply({ embeds: [okE('✅ Panel sent', `In ${ch}\n**Image:** ${imageURL}`)] }).catch(()=>{});
-  } catch (e) {
-    console.error('[APPLYPANEL] send error:', e);
-    m.reply({ embeds: [errE('❌ Failed to send', e.message)] });
+  } catch (e) { m.reply({ embeds: [errE('❌ Failed', e.message)] }); }
+}};
+
+/* ============================================================
+ *  ⭐ !staffinfo — Show ALL staff roles info
+ *  Aliases: !rollinfo all, !roleinfo all, !roles-info all
+ * ============================================================ */
+function buildStaffInfoEmbeds(guild) {
+  const embeds = [];
+
+  // === Header embed ===
+  const header = new EmbedBuilder()
+    .setColor(0x5865f2)
+    .setTitle('🎖️ Staff Roles — 𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷')
+    .setDescription(
+      'جميع الرتب الإدارية مع **الأسماء** و**الـ IDs** و**الصلاحيات** لكل واحدة.\n' +
+      'الرتب مرتبة من **الأدنى (#1)** إلى **الأعلى (#8)**.\n\n' +
+      '**Legend:**\n' +
+      '🔇 `Mute` = مدة الـ Voice Mute المسموحة\n' +
+      '➡️ `Move` = نقل الأعضاء بين الرومات الصوتية\n' +
+      '⏳ `Timeout` = Discord Timeout (كتابة + صوت)\n' +
+      '✏️ `Nick` = تبديل النيك نيم\n' +
+      '👢 `Kick` = طرد عضو\n' +
+      '🔨 `Ban` = Ban دائم\n'
+    )
+    .setFooter({ text: `Total: ${STAFF_ROLES.length} roles • Requested by ${guild.name}` })
+    .setTimestamp();
+  embeds.push(header);
+
+  // === One field per role (fits in one embed if compact) ===
+  const details = new EmbedBuilder()
+    .setColor(0x2b2d31)
+    .setTitle('📋 Roles Details');
+
+  for (const r of STAFF_ROLES) {
+    // Try to get real role name from guild
+    const realRole = guild.roles.cache.get(r.id);
+    const displayName = realRole ? realRole.name : r.label;
+
+    const maxMuteStr = r.maxMute === -1 ? '`Permanent`' : `\`${r.maxMute}m\``;
+
+    const value =
+      `**ID:** \`${r.id}\`\n` +
+      `**Rank:** \`#${r.rank}\`\n` +
+      `**Max Mute:** ${maxMuteStr} • **Min Mute:** \`${r.minMute}m\`\n` +
+      `**Move:** ${r.canMove ? '✅' : '❌'} • **Timeout:** ${r.canTimeout ? '✅' : '❌'}\n` +
+      `**Nickname:** ${r.canNickname ? '✅' : '❌'} • **Kick:** ${r.canKick ? '✅' : '❌'} • **Ban:** ${r.canBan ? '✅' : '❌'}`;
+
+    details.addFields({ name: `#${r.rank} — ${displayName}`, value, inline: false });
   }
+
+  embeds.push(details);
+
+  // === Log channels embed ===
+  const logs = new EmbedBuilder()
+    .setColor(0x57f287)
+    .setTitle('📜 Log Channels')
+    .addFields(
+      { name: 'Ban Logs',      value: BAN_LOG_CHANNEL_ID ? `<#${BAN_LOG_CHANNEL_ID}>` : '—', inline: true },
+      { name: 'Mute Logs',     value: MUTE_LOG_CHANNEL_ID ? `<#${MUTE_LOG_CHANNEL_ID}>` : '—', inline: true },
+      { name: 'Move Logs',     value: MOVE_LOG_CHANNEL_ID ? `<#${MOVE_LOG_CHANNEL_ID}>` : '—', inline: true },
+      { name: 'Timeout Logs',  value: TIMEOUT_LOG_CHANNEL_ID ? `<#${TIMEOUT_LOG_CHANNEL_ID}>` : '—', inline: true },
+      { name: 'Nickname Logs', value: NICKNAME_LOG_CHANNEL_ID ? `<#${NICKNAME_LOG_CHANNEL_ID}>` : '—', inline: true },
+      { name: 'Role Logs',     value: ROLE_LOG_CHANNEL_ID ? `<#${ROLE_LOG_CHANNEL_ID}>` : '—', inline: true }
+    )
+    .setTimestamp();
+  embeds.push(logs);
+
+  return embeds;
+}
+
+commands.staffinfo = {
+  cat: 'Utility',
+  desc: 'Show all staff roles with IDs and permissions',
+  usage: 'staffinfo',
+  async run(m) {
+    const embeds = buildStaffInfoEmbeds(m.guild);
+    await m.reply({ embeds });
+  }
+};
+// Aliases
+commands.staff = commands.staffinfo;
+commands['roles-info'] = commands.staffinfo;
+
+/* ============================================================
+ *  !roleinfo — Show info for a specific role OR "all" for everything
+ * ============================================================ */
+commands.roleinfo = { cat: 'Utility', desc: 'Role info (use "all" for full list)', usage: 'roleinfo <@role|roleID|all>', async run(m, a) {
+  const arg = (a[0] || '').toLowerCase();
+
+  // === !roleinfo all ===
+  if (arg === 'all') {
+    const embeds = buildStaffInfoEmbeds(m.guild);
+    return m.reply({ embeds });
+  }
+
+  // === !roleinfo <role> ===
+  let r = m.mentions.roles.first();
+  if (!r && a[0] && /^\d{17,20}$/.test(a[0].replace(/[<@&>]/g, ''))) {
+    r = m.guild.roles.cache.get(a[0].replace(/[<@&>]/g, '')) || await m.guild.roles.fetch(a[0].replace(/[<@&>]/g, '')).catch(()=>null);
+  }
+  if (!r) r = m.guild.roles.cache.find(x => x.name.toLowerCase() === arg);
+
+  if (!r) return m.reply({ embeds: [errE('Role not found.', 'Usage: `!roleinfo <@role|roleID|all>`')] });
+
+  // Check if this role is a staff role
+  const staffData = STAFF_ROLES.find(s => s.id === r.id);
+
+  const e = infoE(`🏷️ ${r.name}`).addFields(
+    { name: 'ID', value: `\`${r.id}\``, inline: true },
+    { name: 'Color', value: r.hexColor, inline: true },
+    { name: 'Members', value: `${r.members.size}`, inline: true },
+    { name: 'Position', value: `${r.position}`, inline: true },
+    { name: 'Mentionable', value: r.mentionable ? '✅' : '❌', inline: true },
+    { name: 'Hoisted', value: r.hoist ? '✅' : '❌', inline: true }
+  );
+
+  if (staffData) {
+    e.addFields(
+      { name: '🎖️ Staff Rank', value: `#${staffData.rank} — ${staffData.label}`, inline: false },
+      { name: '🔇 Max Mute', value: fmtMinutes(staffData.maxMute), inline: true },
+      { name: '➡️ Move', value: staffData.canMove ? '✅' : '❌', inline: true },
+      { name: '⏳ Timeout', value: staffData.canTimeout ? '✅' : '❌', inline: true },
+      { name: '✏️ Nickname', value: staffData.canNickname ? '✅' : '❌', inline: true },
+      { name: '👢 Kick', value: staffData.canKick ? '✅' : '❌', inline: true },
+      { name: '🔨 Ban', value: staffData.canBan ? '✅' : '❌', inline: true }
+    );
+  }
+
+  m.reply({ embeds: [e] });
 }};
 
 /* ---------- DIAGNOSTIC ---------- */
@@ -454,7 +551,7 @@ commands.mytier = { cat: 'Utility', desc: 'Show your staff tier', async run(m) {
   const t = getStaffTier(m.member);
   if (!t) return m.reply({ embeds: [errE('❌ ما عندكش رتبة staff.')] });
   m.reply({ embeds: [infoE('🎖️ Staff Tier').addFields(
-    { name: 'Rank', value: t.label, inline: true },
+    { name: 'Rank', value: `#${t.rank} — ${t.label}`, inline: true },
     { name: 'Max Mute', value: fmtMinutes(t.maxMute), inline: true },
     { name: 'Min Mute', value: `${t.minMute} min`, inline: true },
     { name: 'Move', value: t.canMove ? '✅' : '❌', inline: true },
@@ -468,9 +565,8 @@ commands.mytier = { cat: 'Utility', desc: 'Show your staff tier', async run(m) {
 commands.ban = { cat: 'Moderation', desc: 'Ban', usage: 'ban <@user|userID> [reason]', async run(m, a) {
   const tier = getStaffTier(m.member);
   if (!tier) return m.reply({ embeds: [errE('❌ No permission.')] });
-  if (!tier.canBan) return m.reply({ embeds: [errE('❌ ما عندكش صلاحية الـ ban.', 'خاصك تكون Owner ولا عندك Administrator permission.')] });
-
-  const t = await resolveMember(m, a[0]) || await resolveMemberById(m.guild, a[0]);
+  if (!tier.canBan) return m.reply({ embeds: [errE('❌ ما عندكش صلاحية الـ ban.', 'خاصك تكون Owner ولا Administrator.')] });
+  const t = (await resolveMember(m, a[0])) || (await resolveMemberById(m.guild, a[0]));
   if (!t) return m.reply({ embeds: [errE('Not found.')] });
   if (!t.bannable) return m.reply({ embeds: [errE('Hierarchy.')] });
   const r = a.slice(1).join(' ') || 'No reason';
@@ -491,8 +587,8 @@ commands.unban = { cat: 'Moderation', desc: 'Unban', usage: 'unban <id>', async 
 }};
 commands.kick = { cat: 'Moderation', desc: 'Kick', usage: 'kick <@user|userID> [reason]', async run(m, a) {
   const tier = getStaffTier(m.member);
-  if (!tier || tier.rank < 3) return m.reply({ embeds: [errE('❌ No permission (Admin+).')] });
-  const t = await resolveMember(m, a[0]) || await resolveMemberById(m.guild, a[0]);
+  if (!tier || !tier.canKick) return m.reply({ embeds: [errE('❌ No permission (Admin+).')] });
+  const t = (await resolveMember(m, a[0])) || (await resolveMemberById(m.guild, a[0]));
   if (!t) return m.reply({ embeds: [errE('Not found.')] });
   if (!t.kickable) return m.reply({ embeds: [errE('Hierarchy.')] });
   const r = a.slice(1).join(' ') || 'No reason';
@@ -507,64 +603,50 @@ commands.kick = { cat: 'Moderation', desc: 'Kick', usage: 'kick <@user|userID> [
 }};
 
 /* ============================================================
- *  !mute — VOICE MUTE (Server Mute) with tier limits
- *  Usage: !mute <@user|userID> <minutes|perm> <reason>
+ *  !mute — VOICE MUTE with tier limits
  * ============================================================ */
 commands.mute = { cat: 'Moderation', desc: 'Voice-mute a member', usage: 'mute <@user|userID> <minutes|perm> <reason>', async run(m, a) {
   const tier = getStaffTier(m.member);
-  if (!tier) return m.reply({ embeds: [errE('❌ ما عندكش صلاحية تدير mute.')] });
+  if (!tier) return m.reply({ embeds: [errE('❌ ما عندكش صلاحية.')] });
 
-  // Resolve target
   let target = m.mentions.members.first() || await resolveMemberById(m.guild, a[0]);
   if (!target) return m.reply({ embeds: [errE('❌ ما لقيتش العضو.', 'Usage: `!mute <@user|userID> <minutes|perm> <reason>`')] });
 
   const durArg = (a[1] || '').trim().toLowerCase();
   const reason = a.slice(2).join(' ').trim();
-  if (!durArg) return m.reply({ embeds: [errE('❌ خاصك تحدد المدة.', 'مثال: `!mute @user 10 spam` ولا `!mute @user perm spam`')] });
+  if (!durArg) return m.reply({ embeds: [errE('❌ خاصك تحدد المدة.')] });
   if (!reason) return m.reply({ embeds: [errE('❌ خاصك تكتب السبب.')] });
 
   let minutes = 0;
   let permanent = false;
 
   if (durArg === 'perm' || durArg === 'permanent') {
-    if (tier.maxMute !== -1) return m.reply({ embeds: [errE('❌ ما عندكش صلاحية الـ mute الدائم.', `الحد الأقصى للـ ${tier.label} هو **${fmtMinutes(tier.maxMute)}**.`)] });
+    if (tier.maxMute !== -1) return m.reply({ embeds: [errE('❌ ما عندكش صلاحية الـ mute الدائم.', `الحد الأقصى للـ ${tier.label}: **${fmtMinutes(tier.maxMute)}**.`)] });
     permanent = true;
   } else {
     minutes = parseInt(durArg, 10);
-    if (isNaN(minutes)) return m.reply({ embeds: [errE('❌ المدة ماشي صحيحة.', 'مثال: `!mute @user 10 spam` ولا `!mute @user perm spam`')] });
-    if (minutes < tier.minMute) return m.reply({ embeds: [errE('❌ المدة قليلة بزاف', `الحد الأدنى هو **${tier.minMute}** دقائق.`)] });
-    if (tier.maxMute === -1) {
-      // unlimited
-    } else if (minutes > tier.maxMute) {
-      if (tier.rank === 1) {
-        return m.reply({ embeds: [errE('❌ mymknch aw9 rak 4a helper', `الحد الأقصى للـ Helper هو **${tier.maxMute} دقائق**.`)] });
-      }
-      return m.reply({ embeds: [errE(`❌ الحد الأقصى للـ ${tier.label} هو **${fmtMinutes(tier.maxMute)}**.`)] });
+    if (isNaN(minutes)) return m.reply({ embeds: [errE('❌ المدة ماشي صحيحة.')] });
+    if (minutes < tier.minMute) return m.reply({ embeds: [errE('❌ المدة قليلة بزاف', `الحد الأدنى: **${tier.minMute}** دقائق.`)] });
+    if (tier.maxMute !== -1 && minutes > tier.maxMute) {
+      if (tier.rank === 1) return m.reply({ embeds: [errE('❌ mymknch aw9 rak 4a helper', `الحد الأقصى للـ Helper: **10 دقائق**.`)] });
+      return m.reply({ embeds: [errE(`❌ الحد الأقصى للـ ${tier.label}: **${fmtMinutes(tier.maxMute)}**.`)] });
     }
   }
 
-  // Must be in voice
-  if (!target.voice?.channel) return m.reply({ embeds: [errE('❌ العضو ماشي فـ voice channel.', 'الـ mute هو **voice mute**.')] });
+  if (!target.voice?.channel) return m.reply({ embeds: [errE('❌ العضو ماشي فـ voice channel.')] });
 
-  // Hierarchy
   const me = m.guild.members.me;
-  if (target.roles.highest.position >= me.roles.highest.position) {
+  if (target.roles.highest.position >= me.roles.highest.position)
     return m.reply({ embeds: [errE('❌ Role hierarchy.')] });
-  }
 
   try {
     await target.voice.setMute(true, `${m.author.tag} [${tier.label}]: ${reason}`);
-
     const key = `${m.guild.id}:${target.id}`;
-    const durLabel = permanent ? 'Permanent' : `${minutes} min`;
     activeMutes[key] = {
-      guildId: m.guild.id,
-      userId: target.id,
+      guildId: m.guild.id, userId: target.id,
       unmuteAt: permanent ? -1 : Date.now() + minutes * 60 * 1000,
-      permanent,
-      reason,
-      modTag: m.author.tag,
-      modTier: tier.label,
+      permanent, reason,
+      modTag: m.author.tag, modTier: tier.label,
       channelId: target.voice.channel.id
     };
     saveMuteConfig(activeMutes);
@@ -572,7 +654,7 @@ commands.mute = { cat: 'Moderation', desc: 'Voice-mute a member', usage: 'mute <
 
     const e = okE('🔇 Voice Muted').addFields(
       { name: 'User', value: `${target.user.tag} (${target.id})`, inline: true },
-      { name: 'Duration', value: durLabel, inline: true },
+      { name: 'Duration', value: permanent ? 'Permanent' : `${minutes} min`, inline: true },
       { name: 'By', value: `${m.author.tag} (${tier.label})`, inline: true },
       { name: 'Channel', value: `<#${target.voice.channel.id}>`, inline: true },
       { name: 'Reason', value: reason }
@@ -580,7 +662,7 @@ commands.mute = { cat: 'Moderation', desc: 'Voice-mute a member', usage: 'mute <
     m.reply({ embeds: [e] });
     sendLog(m.guild, MUTE_LOG_CHANNEL_ID, e);
   } catch (err) {
-    console.error('[MUTE] error:', err);
+    console.error('[MUTE]', err);
     m.reply({ embeds: [errE('❌ فشل الـ mute', err.message)] });
   }
 }};
@@ -588,7 +670,6 @@ commands.mute = { cat: 'Moderation', desc: 'Voice-mute a member', usage: 'mute <
 commands.unmute = { cat: 'Moderation', desc: 'Unmute (voice)', usage: 'unmute <@user|userID>', async run(m, a) {
   const tier = getStaffTier(m.member);
   if (!tier) return m.reply({ embeds: [errE('❌ ما عندكش صلاحية.')] });
-
   const t = m.mentions.members.first() || await resolveMemberById(m.guild, a[0]);
   if (!t) return m.reply({ embeds: [errE('Not found.')] });
   if (!t.voice?.channel) return m.reply({ embeds: [errE('❌ العضو ماشي فـ voice channel.')] });
@@ -608,18 +689,13 @@ commands.unmute = { cat: 'Moderation', desc: 'Unmute (voice)', usage: 'unmute <@
     );
     m.reply({ embeds: [e] });
     sendLog(m.guild, MUTE_LOG_CHANNEL_ID, e);
-  } catch (err) {
-    m.reply({ embeds: [errE('❌ Failed', err.message)] });
-  }
+  } catch (err) { m.reply({ embeds: [errE('❌ Failed', err.message)] }); }
 }};
-commands.timeout = commands.mute;
-commands.untimeout = commands.unmute;
 
 /* ============================================================
- *  !timeout — Discord native timeout (Member Timeout)
- *  Head Admin (rank 6+) and above
+ *  !timeout — Discord native timeout (Head Admin+)
  * ============================================================ */
-commands.timeout = { cat: 'Moderation', desc: 'Timeout a member (text+voice)', usage: 'timeout <@user|userID> <minutes> <reason>', async run(m, a) {
+commands.timeout = { cat: 'Moderation', desc: 'Timeout a member', usage: 'timeout <@user|userID> <minutes> <reason>', async run(m, a) {
   const tier = getStaffTier(m.member);
   if (!tier) return m.reply({ embeds: [errE('❌ ما عندكش صلاحية.')] });
   if (!tier.canTimeout) return m.reply({ embeds: [errE('❌ ما عندكش صلاحية الـ timeout.', 'خاصك تكون Head Admin ولا فوق.')] });
@@ -629,9 +705,8 @@ commands.timeout = { cat: 'Moderation', desc: 'Timeout a member (text+voice)', u
 
   const minutes = parseInt(a[1], 10);
   const reason = a.slice(2).join(' ').trim();
-  if (isNaN(minutes) || minutes < 1) return m.reply({ embeds: [errE('❌ المدة ماشي صحيحة.', 'مثال: `!timeout @user 30 spam`')] });
+  if (isNaN(minutes) || minutes < 1) return m.reply({ embeds: [errE('❌ المدة ماشي صحيحة.')] });
   if (!reason) return m.reply({ embeds: [errE('❌ خاصك تكتب السبب.')] });
-
   if (!target.moderatable) return m.reply({ embeds: [errE('❌ Role hierarchy.')] });
 
   try {
@@ -644,14 +719,12 @@ commands.timeout = { cat: 'Moderation', desc: 'Timeout a member (text+voice)', u
     );
     m.reply({ embeds: [e] });
     sendLog(m.guild, TIMEOUT_LOG_CHANNEL_ID, e);
-  } catch (err) {
-    m.reply({ embeds: [errE('❌ Failed', err.message)] });
-  }
+  } catch (err) { m.reply({ embeds: [errE('❌ Failed', err.message)] }); }
 }};
 commands.untimeout = { cat: 'Moderation', desc: 'Remove timeout', usage: 'untimeout <@user|userID>', async run(m, a) {
   const tier = getStaffTier(m.member);
   if (!tier) return m.reply({ embeds: [errE('❌ ما عندكش صلاحية.')] });
-  if (!tier.canTimeout) return m.reply({ embeds: [errE('❌ ما عندكش صلاحية.', 'خاصك تكون Head Admin ولا فوق.')] });
+  if (!tier.canTimeout) return m.reply({ embeds: [errE('❌ No permission (Head Admin+).')] });
 
   const target = m.mentions.members.first() || await resolveMemberById(m.guild, a[0]);
   if (!target) return m.reply({ embeds: [errE('Not found.')] });
@@ -665,9 +738,7 @@ commands.untimeout = { cat: 'Moderation', desc: 'Remove timeout', usage: 'untime
     );
     m.reply({ embeds: [e] });
     sendLog(m.guild, TIMEOUT_LOG_CHANNEL_ID, e);
-  } catch (err) {
-    m.reply({ embeds: [errE('❌ Failed', err.message)] });
-  }
+  } catch (err) { m.reply({ embeds: [errE('❌ Failed', err.message)] }); }
 }};
 
 commands.warn = { cat: 'Moderation', desc: 'Warn', usage: 'warn <@user|userID> [reason]', async run(m, a) {
@@ -739,45 +810,35 @@ commands.hackban = { cat: 'Moderation', desc: 'Hackban', usage: 'hackban <id> [r
 }};
 
 /* ============================================================
- *  !move — Move a member between voice channels
- *  Moderator (rank 2+) and above
+ *  !move — Moderator (rank 2+)
  * ============================================================ */
 commands.move = { cat: 'Moderation', desc: 'Move a member to another voice channel', usage: 'move <@user|userID> <#voice|voiceID>', async run(m, a) {
   const tier = getStaffTier(m.member);
   if (!tier) return m.reply({ embeds: [errE('❌ ما عندكش صلاحية.')] });
   if (!tier.canMove) return m.reply({ embeds: [errE('❌ mymknkch aw9 rak 4a helper', 'الـ Helper ما عندوش صلاحية الـ move.')] });
-
   if (!a[0] || !a[1]) return m.reply({ embeds: [errE('Usage: `!move <@user|userID> <#voice|voiceID>`')] });
 
-  // Resolve target user
   const target = m.mentions.members.first() || await resolveMemberById(m.guild, a[0]);
-  if (!target) return m.reply({ embeds: [errE('❌ ما لقيتش العضو.', 'استعمل Mention (`@user`) ولا ID صحيح.')] });
+  if (!target) return m.reply({ embeds: [errE('❌ ما لقيتش العضو.')] });
 
-  // Resolve destination channel
   let destCh = m.mentions.channels.first();
   if (!destCh) {
     const chStr = a[1].trim().replace(/[<#>]/g, '');
-    if (/^\d{17,20}$/.test(chStr)) {
-      destCh = m.guild.channels.cache.get(chStr) || await m.guild.channels.fetch(chStr).catch(()=>null);
-    }
+    if (/^\d{17,20}$/.test(chStr)) destCh = m.guild.channels.cache.get(chStr) || await m.guild.channels.fetch(chStr).catch(()=>null);
   }
-  if (!destCh) return m.reply({ embeds: [errE('❌ ما لقيتش الـ voice channel.', 'استعمل `#channel` ولا ID صحيح.')] });
-  if (destCh.type !== ChannelType.GuildVoice && destCh.type !== ChannelType.GuildStageVoice) {
+  if (!destCh) return m.reply({ embeds: [errE('❌ ما لقيتش الـ voice channel.')] });
+  if (destCh.type !== ChannelType.GuildVoice && destCh.type !== ChannelType.GuildStageVoice)
     return m.reply({ embeds: [errE('❌ الهدف ماشي voice channel.')] });
-  }
 
   const fromCh = target.voice?.channel;
-  if (!fromCh) return m.reply({ embeds: [errE('❌ العضو ماشي فـ voice channel.', 'الـ move كيحتاج العضو يكون فـ روم صوتي.')] });
+  if (!fromCh) return m.reply({ embeds: [errE('❌ العضو ماشي فـ voice channel.')] });
   if (fromCh.id === destCh.id) return m.reply({ embeds: [errE('❌ العضو ديجا فـ هاد الروم.')] });
 
   const me = m.guild.members.me;
-  if (target.roles.highest.position >= me.roles.highest.position) {
-    return m.reply({ embeds: [errE('❌ Role hierarchy.')] });
-  }
+  if (target.roles.highest.position >= me.roles.highest.position) return m.reply({ embeds: [errE('❌ Role hierarchy.')] });
 
   try {
     await target.voice.setChannel(destCh, `Moved by ${m.author.tag} (${tier.label})`);
-
     const e = okE('➡️ Member Moved').addFields(
       { name: 'User', value: `${target.user.tag} (${target.id})`, inline: true },
       { name: 'By', value: `${m.author.tag} (${tier.label})`, inline: true },
@@ -786,20 +847,16 @@ commands.move = { cat: 'Moderation', desc: 'Move a member to another voice chann
     );
     m.reply({ embeds: [e] });
     sendLog(m.guild, MOVE_LOG_CHANNEL_ID, e);
-  } catch (err) {
-    console.error('[MOVE] error:', err);
-    m.reply({ embeds: [errE('❌ Failed', err.message)] });
-  }
+  } catch (err) { m.reply({ embeds: [errE('❌ Failed', err.message)] }); }
 }};
 
 /* ============================================================
- *  !nickname — Co-Owner (rank 7+) can change nicknames
+ *  !nickname — Co-Owner (rank 7+)
  * ============================================================ */
-commands.nickname = { cat: 'Members', desc: 'Change a member\'s nickname', usage: 'nickname <@user|userID> <new nickname>', async run(m, a) {
+commands.nickname = { cat: 'Members', desc: 'Change a member nickname', usage: 'nickname <@user|userID> <new nickname>', async run(m, a) {
   const tier = getStaffTier(m.member);
   if (!tier) return m.reply({ embeds: [errE('❌ ما عندكش صلاحية.')] });
   if (!tier.canNickname) return m.reply({ embeds: [errE('❌ ما عندكش صلاحية تبديل النيك نيم.', 'خاصك تكون Co-Owner ولا فوق.')] });
-
   if (!a[0] || a.length < 2) return m.reply({ embeds: [errE('Usage: `!nickname <@user|userID> <new nickname>`')] });
 
   const target = m.mentions.members.first() || await resolveMemberById(m.guild, a[0]);
@@ -809,12 +866,9 @@ commands.nickname = { cat: 'Members', desc: 'Change a member\'s nickname', usage
   if (!nickname) return m.reply({ embeds: [errE('❌ خاصك تحدد النيك نيم الجديد.')] });
 
   const me = m.guild.members.me;
-  if (target.roles.highest.position >= me.roles.highest.position) {
-    return m.reply({ embeds: [errE('❌ Role hierarchy.')] });
-  }
+  if (target.roles.highest.position >= me.roles.highest.position) return m.reply({ embeds: [errE('❌ Role hierarchy.')] });
 
   const oldNick = target.nickname || target.user.username;
-
   try {
     await target.setNickname(nickname, `Changed by ${m.author.tag} (${tier.label})`);
     const e = okE('✏️ Nickname Changed').addFields(
@@ -825,21 +879,17 @@ commands.nickname = { cat: 'Members', desc: 'Change a member\'s nickname', usage
     );
     m.reply({ embeds: [e] });
     sendLog(m.guild, NICKNAME_LOG_CHANNEL_ID, e);
-  } catch (err) {
-    console.error('[NICKNAME] error:', err);
-    m.reply({ embeds: [errE('❌ Failed', err.message)] });
-  }
+  } catch (err) { m.reply({ embeds: [errE('❌ Failed', err.message)] }); }
 }};
-commands.resetnick = { cat: 'Members', desc: 'Reset a member\'s nickname', usage: 'resetnick <@user|userID>', async run(m, a) {
+commands.resetnick = { cat: 'Members', desc: 'Reset a member nickname', usage: 'resetnick <@user|userID>', async run(m, a) {
   const tier = getStaffTier(m.member);
   if (!tier) return m.reply({ embeds: [errE('❌ ما عندكش صلاحية.')] });
-  if (!tier.canNickname) return m.reply({ embeds: [errE('❌ ما عندكش صلاحية.', 'خاصك تكون Co-Owner ولا فوق.')] });
+  if (!tier.canNickname) return m.reply({ embeds: [errE('❌ No permission (Co-Owner+).')] });
 
   const target = m.mentions.members.first() || await resolveMemberById(m.guild, a[0]);
   if (!target) return m.reply({ embeds: [errE('❌ ما لقيتش العضو.')] });
 
   const oldNick = target.nickname || target.user.username;
-
   try {
     await target.setNickname(null, `Reset by ${m.author.tag} (${tier.label})`);
     const e = okE('↩️ Nickname Reset').addFields(
@@ -850,9 +900,7 @@ commands.resetnick = { cat: 'Members', desc: 'Reset a member\'s nickname', usage
     );
     m.reply({ embeds: [e] });
     sendLog(m.guild, NICKNAME_LOG_CHANNEL_ID, e);
-  } catch (err) {
-    m.reply({ embeds: [errE('❌ Failed', err.message)] });
-  }
+  } catch (err) { m.reply({ embeds: [errE('❌ Failed', err.message)] }); }
 }};
 
 /* ---------- MEMBERS ---------- */
@@ -877,7 +925,7 @@ commands.avatar = { cat: 'Members', desc: 'Avatar', usage: 'avatar [@user|userID
   m.reply({ embeds: [infoE(`🖼️ ${u.tag}`).setImage(u.displayAvatarURL({ size: 1024 }))] });
 }};
 commands.membercount = { cat: 'Members', desc: 'Count', async run(m) { m.reply({ embeds: [infoE('👥', `${m.guild.memberCount}`)] }); }};
-commands.roles = { cat: 'Members', desc: 'List roles', async run(m) {
+commands.roles = { cat: 'Members', desc: 'List all roles', async run(m) {
   m.reply({ embeds: [infoE('🏷️ Roles').setDescription(m.guild.roles.cache.sort((a,b)=>b.position-a.position).map(r => r.toString()).join(' ').slice(0, 4000))] });
 }};
 commands.afk = { cat: 'Members', desc: 'AFK', usage: 'afk [reason]', async run(m, a) {
@@ -885,36 +933,6 @@ commands.afk = { cat: 'Members', desc: 'AFK', usage: 'afk [reason]', async run(m
   m.reply({ embeds: [okE('💤', afks.get(m.author.id))] });
 }};
 commands.whois = commands.userinfo;
-
-/* ---------- SECURITY ---------- */
-commands.logs = { cat: 'Security', desc: 'Log config', async run(m) {
-  m.reply({ embeds: [infoE('📜 Logs').addFields(
-    { name: 'Role', value: ROLE_LOG_CHANNEL_ID ? `<#${ROLE_LOG_CHANNEL_ID}>` : '—', inline: true },
-    { name: 'Mute', value: MUTE_LOG_CHANNEL_ID ? `<#${MUTE_LOG_CHANNEL_ID}>` : '—', inline: true },
-    { name: 'Move', value: MOVE_LOG_CHANNEL_ID ? `<#${MOVE_LOG_CHANNEL_ID}>` : '—', inline: true },
-    { name: 'Ban', value: BAN_LOG_CHANNEL_ID ? `<#${BAN_LOG_CHANNEL_ID}>` : '—', inline: true },
-    { name: 'Timeout', value: TIMEOUT_LOG_CHANNEL_ID ? `<#${TIMEOUT_LOG_CHANNEL_ID}>` : '—', inline: true },
-    { name: 'Nickname', value: NICKNAME_LOG_CHANNEL_ID ? `<#${NICKNAME_LOG_CHANNEL_ID}>` : '—', inline: true },
-    { name: 'Kick', value: KICK_LOG_CHANNEL_ID ? `<#${KICK_LOG_CHANNEL_ID}>` : '—', inline: true })] });
-}};
-commands.audit = { cat: 'Security', desc: 'Audit', async run(m) {
-  const tier = getStaffTier(m.member);
-  if (!tier || tier.rank < 2) return m.reply({ embeds: [errE('❌ No permission (Moderator+).')] });
-  const logs = await m.guild.fetchAuditLogs({ limit: 10 }).catch(()=>null);
-  if (!logs) return m.reply({ embeds: [errE('Failed.')] });
-  m.reply({ embeds: [infoE('📋 Audit').setDescription(logs.entries.map(e => `**${e.action}** — ${e.executor?.tag || '?'} → ${e.target?.tag || e.targetId || ''}`).join('\n') || 'Empty')] });
-}};
-const toggle = (key, name) => ({ cat: 'Security', desc: `Toggle ${name}`, async run(m) {
-  const tier = getStaffTier(m.member);
-  if (!tier || tier.rank < 8) return m.reply({ embeds: [errE('❌ Owner only.')] });
-  settings[key] = !settings[key];
-  m.reply({ embeds: [okE(`🛡️ ${name}`, `${settings[key] ? 'ON' : 'OFF'}`)] });
-}});
-commands.antispam = toggle('antispam', 'Anti-spam');
-commands.antiinvite = toggle('antiinvite', 'Anti-invite');
-commands.antiraid = toggle('antiraid', 'Anti-raid');
-commands.antimention = toggle('antimention', 'Anti-mention');
-commands.automod = toggle('automod', 'Automod');
 
 /* ---------- UTILITY ---------- */
 commands.help = { cat: 'Utility', desc: 'List commands', usage: 'help [command]', async run(m, a) {
@@ -1026,12 +1044,12 @@ client.once('ready', async () => {
   console.log('==============================');
   console.log(`[READY] Logged in as ${client.user.tag}`);
   console.log(`[READY] Guilds: ${client.guilds.cache.size}`);
+  console.log(`[READY] Staff roles loaded: ${STAFF_ROLES.length}`);
   console.log(`[READY] Mute Log: ${MUTE_LOG_CHANNEL_ID}`);
   console.log(`[READY] Move Log: ${MOVE_LOG_CHANNEL_ID}`);
   console.log(`[READY] Ban Log: ${BAN_LOG_CHANNEL_ID}`);
   console.log(`[READY] Timeout Log: ${TIMEOUT_LOG_CHANNEL_ID}`);
   console.log(`[READY] Nickname Log: ${NICKNAME_LOG_CHANNEL_ID}`);
-  console.log(`[READY] Staff Roles: Helper→Owner (8 tiers)`);
   for (const [, guild] of client.guilds.cache) {
     const ch = guild.channels.cache.get(WELCOME_CHANNEL_ID);
     if (ch) {
@@ -1075,15 +1093,14 @@ client.on(Events.InteractionCreate, async interaction => {
     try {
       const guild = interaction.guild;
       const member = await guild.members.fetch(interaction.user.id);
-      if (member.roles.cache.has(VERIFIED_ROLE_ID)) {
+      if (member.roles.cache.has(VERIFIED_ROLE_ID))
         return interaction.reply({ embeds: [infoE('ℹ️ Already Verified', 'راك ديجا verified!')], ephemeral: true });
-      }
       await member.roles.add(VERIFIED_ROLE_ID, 'Verified via button');
       if (UNVERIFIED_ROLE_ID && member.roles.cache.has(UNVERIFIED_ROLE_ID))
         await member.roles.remove(UNVERIFIED_ROLE_ID, 'Verified').catch(()=>{});
-      await interaction.reply({ embeds: [okE('✅ Verified!', `مرحبا بيك فـ **𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷**! دابا عندك access لجميع الرومات.`)], ephemeral: true });
+      await interaction.reply({ embeds: [okE('✅ Verified!', `مرحبا بيك فـ **𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷**! دابا عندك access.`)], ephemeral: true });
     } catch (e) {
-      console.error('[VERIFY] ❌', e);
+      console.error('[VERIFY]', e);
       if (!interaction.replied && !interaction.deferred)
         interaction.reply({ embeds: [errE('❌ Error', e.message)], ephemeral: true }).catch(()=>{});
     }
@@ -1096,17 +1113,13 @@ client.on(Events.InteractionCreate, async interaction => {
     const type = isMc ? 'Minecraft Staff' : 'Discord Staff';
     const questions = isMc ? APPLY_QUESTIONS_MC : APPLY_QUESTIONS_DISCORD;
 
-    if (dmApplications.has(userId)) {
-      return interaction.reply({
-        embeds: [errE('❌ Already Applying', 'عندك application مفتوحة دابا.')],
-        ephemeral: true
-      });
-    }
+    if (dmApplications.has(userId))
+      return interaction.reply({ embeds: [errE('❌ Already Applying', 'عندك application مفتوحة.')], ephemeral: true });
 
     try {
       const dm = await interaction.user.createDM();
       dmApplications.set(userId, { type, step: 0, answers: {}, questions, guildId: interaction.guild.id, startedAt: Date.now() });
-      await interaction.reply({ embeds: [okE('📩 DM Sent', 'تحقق من الـ DMs ديالك باش تبدا الأسئلة!')], ephemeral: true });
+      await interaction.reply({ embeds: [okE('📩 DM Sent', 'تحقق من الـ DMs!')], ephemeral: true });
 
       const first = questions[0];
       await dm.send({ embeds: [
@@ -1115,8 +1128,7 @@ client.on(Events.InteractionCreate, async interaction => {
           .setTitle(`📝 Application — ${type}`)
           .setDescription(
             `مرحبا <@${userId}>! غادي نسولك **${questions.length}** أسئلة.\n` +
-            `جاوب على كل سؤال بصدق.\n\n` +
-            `اكتب \`cancel\` فـ أي وقت باش تلغي.\n\n` +
+            `اكتب \`cancel\` باش تلغي.\n\n` +
             `**Q1/${questions.length}:** ${first.q}`
           )
           .setFooter({ text: '𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 • Applications' })
@@ -1125,10 +1137,7 @@ client.on(Events.InteractionCreate, async interaction => {
     } catch (e) {
       console.error('[APPLY] DM failed:', e.message);
       dmApplications.delete(userId);
-      return interaction.reply({
-        embeds: [errE('❌ Cannot DM you', 'خاصك تفتح الـ DMs من إعدادات السيرفر.')],
-        ephemeral: true
-      });
+      return interaction.reply({ embeds: [errE('❌ Cannot DM you', 'افتح الـ DMs من إعدادات السيرفر.')], ephemeral: true });
     }
     return;
   }
@@ -1136,16 +1145,15 @@ client.on(Events.InteractionCreate, async interaction => {
   if (id.startsWith('apply_accept_')) {
     const tier = getStaffTier(interaction.member);
     if (!tier || tier.rank < 3) return interaction.reply({ embeds: [errE('❌ Admin only.')], ephemeral: true });
-
     const userId = id.replace('apply_accept_', '');
     try {
       const user = await client.users.fetch(userId).catch(()=>null);
-      if (user) await user.send({ embeds: [okE('🎉 Congratulations!', `**تم قبولك فـ Staff 𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷!**\n\nYour application has been **accepted**.`)] }).catch(()=>{});
+      if (user) await user.send({ embeds: [okE('🎉 Congratulations!', `**تم قبولك فـ Staff 𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷!**`)] }).catch(()=>{});
       const data = applications.get(interaction.message.id);
       const e = okE('✅ Application Accepted').addFields(
-        { name: 'Applicant', value: `<@${userId}> (\`${userId}\`)` },
-        { name: 'Type', value: data?.type || 'Unknown' },
-        { name: 'Reviewed by', value: `${interaction.user.tag}` });
+        { name: 'Applicant', value: `<@${userId}>`, inline: true },
+        { name: 'Type', value: data?.type || 'Unknown', inline: true },
+        { name: 'Reviewed by', value: `${interaction.user.tag}`, inline: true });
       await interaction.reply({ embeds: [e] });
       try { await interaction.message.edit({ components: [] }); } catch {}
     } catch (e) { console.error('[ACCEPT]', e); }
@@ -1155,14 +1163,13 @@ client.on(Events.InteractionCreate, async interaction => {
   if (id.startsWith('apply_reject_')) {
     const tier = getStaffTier(interaction.member);
     if (!tier || tier.rank < 3) return interaction.reply({ embeds: [errE('❌ Admin only.')], ephemeral: true });
-
     const userId = id.replace('apply_reject_', '');
     try {
       const user = await client.users.fetch(userId).catch(()=>null);
-      if (user) await user.send({ embeds: [errE('❌ Application Result', `**للأسف، تم رفض طلبك.**\n\nYour application has been **rejected**.`)] }).catch(()=>{});
+      if (user) await user.send({ embeds: [errE('❌ Application Result', `**للأسف، تم رفض طلبك.**`)] }).catch(()=>{});
       const e = errE('❌ Application Rejected').addFields(
-        { name: 'Applicant', value: `<@${userId}> (\`${userId}\`)` },
-        { name: 'Reviewed by', value: `${interaction.user.tag}` });
+        { name: 'Applicant', value: `<@${userId}>`, inline: true },
+        { name: 'Reviewed by', value: `${interaction.user.tag}`, inline: true });
       await interaction.reply({ embeds: [e] });
       try { await interaction.message.edit({ components: [] }); } catch {}
     } catch (e) { console.error('[REJECT]', e); }
@@ -1187,8 +1194,6 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
     }
     return;
   }
-
-  // Re-apply mute if muted member rejoins
   const key = `${newState.guild?.id}:${newState.id}`;
   if (activeMutes[key] && newState.channelId && !newState.serverMute) {
     try { await newState.setMute(true, 'Restoring voice mute'); } catch {}
@@ -1267,7 +1272,7 @@ client.on('messageCreate', async message => {
 
     if (app.step >= app.questions.length) {
       dmApplications.delete(userId);
-      await message.reply({ embeds: [okE('✅ Application Sent!', 'شكراً! تم إرسال طلبك.')] }).catch(()=>{});
+      await message.reply({ embeds: [okE('✅ Application Sent!', 'شكراً!')] }).catch(()=>{});
 
       const guild = client.guilds.cache.get(app.guildId);
       const resultsCh = guild?.channels.cache.get(APPLY_RESULTS_CHANNEL_ID)
@@ -1287,10 +1292,8 @@ client.on('messageCreate', async message => {
         .setFooter({ text: 'Use buttons below to Accept or Reject' })
         .setTimestamp();
 
-      for (const q of app.questions) {
-        const val = app.answers[q.key] || '(empty)';
-        embed.addFields({ name: q.label, value: `\`\`\`${String(val).slice(0, 1000)}\`\`\`` });
-      }
+      for (const q of app.questions)
+        embed.addFields({ name: q.label, value: `\`\`\`${String(app.answers[q.key] || '(empty)').slice(0, 1000)}\`\`\`` });
 
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(`apply_accept_${userId}`).setLabel('Accept').setEmoji('✅').setStyle(ButtonStyle.Success),
@@ -1335,12 +1338,10 @@ client.on('messageCreate', async message => {
       message.channel.send({ embeds: [errE('🛡️ Anti-spam', `${message.author} timed out 1m.`)] }).catch(()=>{});
     }
   }
-  if (settings.antiinvite && !has(message.member, PermissionFlagsBits.ManageMessages) && /(discord\.gg|discord\.com\/invite)\//i.test(message.content)) {
+  if (settings.antiinvite && !has(message.member, PermissionFlagsBits.ManageMessages) && /(discord\.gg|discord\.com\/invite)\//i.test(message.content))
     message.delete().catch(()=>{});
-  }
-  if (settings.antimention && !has(message.member, PermissionFlagsBits.ManageMessages) && message.mentions.users.size >= 5) {
+  if (settings.antimention && !has(message.member, PermissionFlagsBits.ManageMessages) && message.mentions.users.size >= 5)
     message.delete().catch(()=>{});
-  }
   if (settings.automod && !has(message.member, PermissionFlagsBits.ManageMessages)) {
     const bad = ['fuck','shit','bitch','كلب','زبي','قحبة'];
     if (bad.some(w => message.content.toLowerCase().includes(w))) message.delete().catch(()=>{});
@@ -1349,6 +1350,16 @@ client.on('messageCreate', async message => {
   if (!message.content.startsWith(PREFIX)) return;
   const args = message.content.slice(PREFIX.length).trim().split(/\s+/);
   const name = args.shift().toLowerCase();
+
+  // === Special handling: "roll all info" ===
+  if (name === 'roll' && args[0]?.toLowerCase() === 'all' && args[1]?.toLowerCase() === 'info') {
+    return commands.staffinfo.run(message, []);
+  }
+  // === "role all" also ===
+  if (name === 'role' && args[0]?.toLowerCase() === 'all' && args[1]?.toLowerCase() === 'info') {
+    return commands.staffinfo.run(message, []);
+  }
+
   const cmd = commands[name];
   if (!cmd) return;
   try { await cmd.run(message, args, client); }
