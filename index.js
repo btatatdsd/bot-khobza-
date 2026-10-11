@@ -6,7 +6,8 @@ require('dotenv').config();
 const {
   Client, GatewayIntentBits, Partials, EmbedBuilder,
   PermissionFlagsBits, ChannelType, ActivityType, AuditLogEvent,
-  ActionRowBuilder, ButtonBuilder, ButtonStyle, Events
+  ActionRowBuilder, ButtonBuilder, ButtonStyle, Events,
+  ModalBuilder, TextInputBuilder, TextInputStyle
 } = require('discord.js');
 const { joinVoiceChannel, getVoiceConnection, VoiceConnectionStatus, entersState } = require('@discordjs/voice');
 const fs = require('fs');
@@ -31,6 +32,7 @@ const DATA_DIR                 = process.env.DATA_DIR || __dirname;
 const VOICE_CFG_FILE           = path.join(DATA_DIR, 'voice-config.json');
 const MUTE_CFG_FILE            = path.join(DATA_DIR, 'mute-config.json');
 const GIVEAWAY_CFG_FILE        = path.join(DATA_DIR, 'giveaway-config.json');
+const BOTWL_CFG_FILE           = path.join(DATA_DIR, 'bot-whitelist.json');
 const RECONNECT_DELAY          = 5000;
 const VERIFY_CHANNEL_ID        = process.env.VERIFY_CHANNEL_ID || '1558503393226530947';
 const VERIFY_IMAGE             = process.env.VERIFY_IMAGE || '';
@@ -48,6 +50,9 @@ const MANAGER_ROLE_ID = process.env.MANAGER_ROLE_ID || '1557761083589132489';
 const HEAD_ROLE_ID    = process.env.HEAD_ROLE_ID    || '1557761065545240587';
 const COOWNER_ROLE_ID = process.env.COOWNER_ROLE_ID || '1557761063452156034';
 const OWNER_ROLE_ID   = process.env.OWNER_ROLE_ID   || '1557761062013763655';
+
+/* === Bot protection === */
+const BOT_WHITELIST_CODE = process.env.BOT_WHITELIST_CODE || '1235';
 
 if (!TOKEN) { console.error('[FATAL] DISCORD_TOKEN missing.'); process.exit(1); }
 
@@ -117,6 +122,33 @@ function getStaffTier(member) {
   return best;
 }
 
+/* ===================== BOT WHITELIST STORAGE ===================== */
+/**
+ * bot-whitelist.json:
+ * {
+ *   "bots": {
+ *     "<botUserId>": { addedBy: "tag", addedAt: timestamp, note: "..." }
+ *   }
+ * }
+ */
+function loadBotWhitelist() {
+  try { if (fs.existsSync(BOTWL_CFG_FILE)) return JSON.parse(fs.readFileSync(BOTWL_CFG_FILE, 'utf8')); }
+  catch (e) { console.error('[BOTWL] load:', e.message); }
+  return { bots: {} };
+}
+function saveBotWhitelist(data) {
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(BOTWL_CFG_FILE, JSON.stringify(data, null, 2));
+  } catch (e) { console.error('[BOTWL] save:', e.message); }
+}
+const botWhitelist = loadBotWhitelist();
+if (!botWhitelist.bots) botWhitelist.bots = {};
+
+function isBotWhitelisted(userId) {
+  return !!botWhitelist.bots[userId];
+}
+
 /* ===================== VOICE MUTE STORAGE ===================== */
 function loadMuteConfig() {
   try { if (fs.existsSync(MUTE_CFG_FILE)) return JSON.parse(fs.readFileSync(MUTE_CFG_FILE, 'utf8')); }
@@ -175,13 +207,6 @@ async function restoreMutes() {
 }
 
 /* ===================== GIVEAWAY STORAGE ===================== */
-/* Structure: {
- *   messageId: {
- *     guildId, channelId, hostId, prize, winners, imageURL,
- *     endsAt, ended, entries: [userIds], winnerIds: []
- *   }
- * }
- */
 function loadGiveawayConfig() {
   try { if (fs.existsSync(GIVEAWAY_CFG_FILE)) return JSON.parse(fs.readFileSync(GIVEAWAY_CFG_FILE, 'utf8')); }
   catch (e) { console.error('[GIVEAWAY CFG] load:', e.message); }
@@ -216,7 +241,7 @@ function buildGiveawayEmbed(gw, ended = false) {
           (gw.winnerIds.length
             ? `**Winners:** ${gw.winnerIds.map(id => `<@${id}>`).join(', ')}`
             : `**Winners:** ❌ No valid entries`)
-        : `⏳ **Ends:** <t:${Math.floor(gw.endsAt/1000)}:R> (<t:${Math.floor(gw.endsAt/1000)}:f>)\n` +
+        : `⏳ **Ends:** <t:${Math.floor(gw.endsAt/1000)}:R>\n` +
           `**Time left:** ${h > 0 ? `${h}h ` : ''}${m}m ${s}s`)
     )
     .setFooter({ text: ended ? 'Giveaway finished' : 'React with 🎉 to enter!' })
@@ -229,7 +254,6 @@ function buildGiveawayEmbed(gw, ended = false) {
 async function endGiveaway(messageId) {
   const gw = activeGiveaways[messageId];
   if (!gw || gw.ended) return;
-
   gw.ended = true;
   saveGiveawayConfig(activeGiveaways);
   if (giveawayTimers.has(messageId)) { clearTimeout(giveawayTimers.get(messageId)); giveawayTimers.delete(messageId); }
@@ -241,9 +265,7 @@ async function endGiveaway(messageId) {
   const msg = await channel.messages.fetch(messageId).catch(()=>null);
   if (!msg) return;
 
-  // Pick winners
   const entries = [...new Set(gw.entries)].filter(id => {
-    // Remove bots and left users
     const mem = guild.members.cache.get(id);
     return mem && !mem.user.bot;
   });
@@ -259,7 +281,6 @@ async function endGiveaway(messageId) {
   gw.winnerIds = winners;
   saveGiveawayConfig(activeGiveaways);
 
-  // Edit message
   try {
     await msg.edit({
       content: winners.length ? `🎉 Congratulations ${winners.map(id => `<@${id}>`).join(', ')}!` : '❌ No valid entries.',
@@ -268,13 +289,11 @@ async function endGiveaway(messageId) {
     });
   } catch (e) { console.error('[GIVEAWAY] edit error:', e.message); }
 
-  // Notify in channel
   if (winners.length) {
     channel.send({ content: `🎉 ${winners.map(id => `<@${id}>`).join(', ')} won **${gw.prize}**!` }).catch(()=>{});
   } else {
     channel.send({ content: `❌ No valid entries for **${gw.prize}**.` }).catch(()=>{});
   }
-
   console.log(`[GIVEAWAY] Ended ${messageId} — winners: ${winners.join(', ') || 'none'}`);
 }
 
@@ -282,9 +301,8 @@ async function restoreGiveaways() {
   for (const [messageId, gw] of Object.entries(activeGiveaways)) {
     if (gw.ended) continue;
     const delay = gw.endsAt - Date.now();
-    if (delay <= 0) {
-      endGiveaway(messageId).catch(()=>{});
-    } else {
+    if (delay <= 0) endGiveaway(messageId).catch(()=>{});
+    else {
       const t = setTimeout(() => endGiveaway(messageId).catch(()=>{}), delay);
       giveawayTimers.set(messageId, t);
     }
@@ -449,19 +467,108 @@ async function sendWelcome(guild, member) {
 const commands = {};
 
 /* ============================================================
- *  ⭐ !giveaway — Advanced Giveaway System
- *  Usage: !giveaway <time> <winners> <prize> [imageURL]
- *  Example: !giveaway 10m 1 Nitro https://i.imgur.com/xxx.png
+ *  ⭐ !wyh <botUserId> — Whitelist a bot (asks for code via modal)
+ * ============================================================ */
+commands.wyh = {
+  cat: 'Security',
+  desc: 'Whitelist a bot so it won\'t be auto-banned',
+  usage: 'wyh <botUserId>',
+  async run(m, a) {
+    const tier = getStaffTier(m.member);
+    if (!tier || tier.rank < 3) return m.reply({ embeds: [errE('❌ No permission (Admin+).')] });
+
+    const targetId = (a[0] || '').replace(/[<@!>]/g, '').trim();
+    if (!targetId || !/^\d{17,20}$/.test(targetId)) {
+      return m.reply({ embeds: [errE('❌ Provide a valid bot user ID.', 'Usage: `!wyh <botUserId>`')] });
+    }
+
+    // Check if it's actually a bot
+    const user = await client.users.fetch(targetId).catch(()=>null);
+    if (!user) return m.reply({ embeds: [errE('❌ User not found on Discord.')] });
+    if (!user.bot) return m.reply({ embeds: [errE('❌ This user is not a bot.', 'هاد الـ ID ماشي ديال بوت. الـ whitelist غير للبوتات.')] });
+
+    // Open modal for code
+    const modal = new ModalBuilder()
+      .setCustomId(`wyh_modal_${targetId}`)
+      .setTitle('Bot Whitelist — Enter Code');
+
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('wyh_code')
+          .setLabel('Security Code')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setMinLength(4)
+          .setMaxLength(20)
+          .setPlaceholder('Enter the security code...')
+      )
+    );
+
+    return m.showModal(modal).catch(e => console.error('[WYH] modal:', e));
+  }
+};
+
+/* ============================================================
+ *  !unwyh <botUserId> — Remove a bot from whitelist
+ * ============================================================ */
+commands.unwyh = {
+  cat: 'Security',
+  desc: 'Remove a bot from the whitelist',
+  usage: 'unwyh <botUserId>',
+  async run(m, a) {
+    const tier = getStaffTier(m.member);
+    if (!tier || tier.rank < 3) return m.reply({ embeds: [errE('❌ No permission (Admin+).')] });
+
+    const targetId = (a[0] || '').replace(/[<@!>]/g, '').trim();
+    if (!targetId || !/^\d{17,20}$/.test(targetId)) return m.reply({ embeds: [errE('Usage: `!unwyh <botUserId>`')] });
+
+    if (!isBotWhitelisted(targetId)) return m.reply({ embeds: [errE('❌ هاد البوت ماشي فـ الـ whitelist.')] });
+
+    delete botWhitelist.bots[targetId];
+    saveBotWhitelist(botWhitelist);
+
+    const e = okE('🗑️ Bot Removed from Whitelist').addFields(
+      { name: 'Bot ID', value: `\`${targetId}\``, inline: true },
+      { name: 'By', value: `${m.author.tag} (${tier.label})`, inline: true }
+    );
+    m.reply({ embeds: [e] });
+    sendLog(m.guild, BAN_LOG_CHANNEL_ID, e);
+  }
+};
+
+/* ============================================================
+ *  !wyhlist — Show whitelisted bots
+ * ============================================================ */
+commands.wyhlist = {
+  cat: 'Security',
+  desc: 'List all whitelisted bots',
+  async run(m) {
+    const tier = getStaffTier(m.member);
+    if (!tier || tier.rank < 2) return m.reply({ embeds: [errE('❌ No permission.')] });
+
+    const entries = Object.entries(botWhitelist.bots);
+    if (!entries.length) return m.reply({ embeds: [infoE('🤖 Whitelisted Bots', 'ما كاين حتى بوت فـ الـ whitelist.')] });
+
+    const list = entries.map(([id, data], i) =>
+      `**#${i+1}** <@${id}> (\`${id}\`)\n  *Added by ${data.addedBy} • <t:${Math.floor(data.addedAt/1000)}:R>*`
+    ).join('\n');
+
+    const e = infoE(`🤖 Whitelisted Bots (${entries.length})`).setDescription(list.slice(0, 4000));
+    m.reply({ embeds: [e] });
+  }
+};
+
+/* ============================================================
+ *  ⭐ !giveaway — Advanced Giveaway
  * ============================================================ */
 commands.giveaway = {
   cat: 'Fun',
-  desc: 'Start a giveaway with image and multiple winners',
+  desc: 'Start a giveaway',
   usage: 'giveaway <time> <winners> <prize...> [imageURL]',
   async run(m, a) {
     const tier = getStaffTier(m.member);
-    if (!tier || !tier.canGiveaway) {
-      return m.reply({ embeds: [errE('❌ No permission.', 'خاصك تكون Moderator ولا فوق.')] });
-    }
+    if (!tier || !tier.canGiveaway) return m.reply({ embeds: [errE('❌ No permission (Moderator+).')] });
 
     if (a.length < 3) {
       return m.reply({ embeds: [
@@ -470,8 +577,8 @@ commands.giveaway = {
           '**Examples:**\n' +
           '`!giveaway 10m 1 Nitro`\n' +
           '`!giveaway 1h 3 $50 Gift Card`\n' +
-          '`!giveaway 1d 1 Minecraft Rank https://i.imgur.com/xxx.png`\n\n' +
-          '**Time formats:** `s` (seconds), `m` (minutes), `h` (hours), `d` (days), `w` (weeks)'
+          '`!giveaway 1d 1 Rank https://i.imgur.com/xxx.png`\n\n' +
+          '**Time:** `s` `m` `h` `d` `w`'
         )
       ] });
     }
@@ -480,136 +587,80 @@ commands.giveaway = {
     if (!durationMs) return m.reply({ embeds: [errE('❌ Time format invalid.', 'Use: `10m`, `1h`, `1d`, `1w`')] });
 
     const winners = parseInt(a[1], 10);
-    if (isNaN(winners) || winners < 1 || winners > 50) {
-      return m.reply({ embeds: [errE('❌ Winners must be between 1 and 50.')] });
-    }
+    if (isNaN(winners) || winners < 1 || winners > 50) return m.reply({ embeds: [errE('❌ Winners 1-50.')] });
 
     let rest = a.slice(2);
     let imageURL = '';
-
-    // If last arg looks like an image URL → use it
-    if (rest.length > 1 && /^https?:\/\/\S+/i.test(rest[rest.length - 1])) {
-      imageURL = rest.pop();
-    }
-    // Or check attachments
+    if (rest.length > 1 && /^https?:\/\/\S+/i.test(rest[rest.length - 1])) imageURL = rest.pop();
     if (!imageURL && m.attachments.size) imageURL = m.attachments.first().url;
 
     const prize = rest.join(' ').trim();
     if (!prize) return m.reply({ embeds: [errE('❌ Provide a prize.')] });
 
-    const endsAt = Date.now() + durationMs;
-
-    // Build the giveaway embed
     const gw = {
-      guildId: m.guild.id,
-      channelId: m.channel.id,
-      hostId: m.author.id,
-      prize,
-      winners,
-      imageURL,
-      endsAt,
-      ended: false,
-      entries: [],
-      winnerIds: []
+      guildId: m.guild.id, channelId: m.channel.id,
+      hostId: m.author.id, prize, winners, imageURL,
+      endsAt: Date.now() + durationMs,
+      ended: false, entries: [], winnerIds: []
     };
-
-    const embed = buildGiveawayEmbed(gw, false);
 
     let msg;
     try {
-      msg = await m.channel.send({ embeds: [embed] });
+      msg = await m.channel.send({ embeds: [buildGiveawayEmbed(gw, false)] });
       await msg.react('🎉');
-    } catch (e) {
-      return m.reply({ embeds: [errE('❌ Failed to send giveaway', e.message)] });
-    }
+    } catch (e) { return m.reply({ embeds: [errE('❌ Failed', e.message)] }); }
 
-    // Save
     activeGiveaways[msg.id] = gw;
     saveGiveawayConfig(activeGiveaways);
-
-    // Schedule end
     const timer = setTimeout(() => endGiveaway(msg.id).catch(()=>{}), durationMs);
     giveawayTimers.set(msg.id, timer);
 
-    console.log(`[GIVEAWAY] Started ${msg.id} — ${prize} — ends in ${fmtDur(durationMs)}`);
-
-    // Confirm to host (ephemeral-style, but message-based)
-    m.reply({ embeds: [
-      okE('✅ Giveaway Started!', 
-        `**Prize:** ${prize}\n` +
-        `**Winners:** ${winners}\n` +
-        `**Ends in:** ${fmtDur(durationMs)}\n` +
-        `**Message:** [Jump](${msg.url})\n` +
-        `**Message ID:** \`${msg.id}\``
-      )
-    ] }).catch(()=>{});
+    m.reply({ embeds: [okE('✅ Giveaway Started!', 
+      `**Prize:** ${prize}\n**Winners:** ${winners}\n**Ends in:** ${fmtDur(durationMs)}\n**Message ID:** \`${msg.id}\``
+    )] }).catch(()=>{});
   }
 };
 
-/* ============================================================
- *  !gend — Force-end a giveaway (by message ID)
- * ============================================================ */
-commands.gend = {
-  cat: 'Fun',
-  desc: 'Force-end a giveaway',
-  usage: 'gend <messageID>',
-  async run(m, a) {
-    const tier = getStaffTier(m.member);
-    if (!tier || !tier.canGiveaway) return m.reply({ embeds: [errE('❌ No permission.')] });
-    const id = (a[0] || '').trim();
-    if (!id) return m.reply({ embeds: [errE('Usage: `!gend <messageID>`')] });
-    const gw = activeGiveaways[id];
-    if (!gw) return m.reply({ embeds: [errE('❌ Giveaway not found.')] });
-    if (gw.ended) return m.reply({ embeds: [errE('❌ Already ended.')] });
-    await endGiveaway(id);
-    m.reply({ embeds: [okE('✅ Ended', `Giveaway \`${id}\` ended.`)] }).catch(()=>{});
+commands.gend = { cat: 'Fun', desc: 'Force-end giveaway', usage: 'gend <messageID>', async run(m, a) {
+  const tier = getStaffTier(m.member);
+  if (!tier || !tier.canGiveaway) return m.reply({ embeds: [errE('❌ No permission.')] });
+  const id = (a[0] || '').trim();
+  if (!id) return m.reply({ embeds: [errE('Usage: `!gend <messageID>`')] });
+  const gw = activeGiveaways[id];
+  if (!gw) return m.reply({ embeds: [errE('❌ Not found.')] });
+  if (gw.ended) return m.reply({ embeds: [errE('❌ Already ended.')] });
+  await endGiveaway(id);
+  m.reply({ embeds: [okE('✅ Ended', `Giveaway \`${id}\` ended.`)] }).catch(()=>{});
+}};
+
+commands.greroll = { cat: 'Fun', desc: 'Re-roll winners', usage: 'greroll <messageID>', async run(m, a) {
+  const tier = getStaffTier(m.member);
+  if (!tier || !tier.canGiveaway) return m.reply({ embeds: [errE('❌ No permission.')] });
+  const id = (a[0] || '').trim();
+  if (!id) return m.reply({ embeds: [errE('Usage: `!greroll <messageID>`')] });
+  const gw = activeGiveaways[id];
+  if (!gw) return m.reply({ embeds: [errE('❌ Not found.')] });
+  if (!gw.ended) return m.reply({ embeds: [errE('❌ Still running.')] });
+
+  const entries = [...new Set(gw.entries)].filter(uid => {
+    const mem = m.guild.members.cache.get(uid);
+    return mem && !mem.user.bot;
+  });
+  const newWinners = [];
+  const pool = [...entries];
+  while (newWinners.length < gw.winners && pool.length > 0) {
+    const idx = Math.floor(Math.random() * pool.length);
+    newWinners.push(pool[idx]);
+    pool.splice(idx, 1);
   }
-};
+  if (!newWinners.length) return m.reply({ embeds: [errE('❌ No valid entries.')] });
+  gw.winnerIds = newWinners;
+  saveGiveawayConfig(activeGiveaways);
 
-/* ============================================================
- *  !greroll — Re-roll winners
- * ============================================================ */
-commands.greroll = {
-  cat: 'Fun',
-  desc: 'Re-roll winners of an ended giveaway',
-  usage: 'greroll <messageID>',
-  async run(m, a) {
-    const tier = getStaffTier(m.member);
-    if (!tier || !tier.canGiveaway) return m.reply({ embeds: [errE('❌ No permission.')] });
-    const id = (a[0] || '').trim();
-    if (!id) return m.reply({ embeds: [errE('Usage: `!greroll <messageID>`')] });
-    const gw = activeGiveaways[id];
-    if (!gw) return m.reply({ embeds: [errE('❌ Not found.')] });
-    if (!gw.ended) return m.reply({ embeds: [errE('❌ Still running.')] });
-
-    const guild = m.guild;
-    const entries = [...new Set(gw.entries)].filter(uid => {
-      const mem = guild.members.cache.get(uid);
-      return mem && !mem.user.bot;
-    });
-
-    const newWinners = [];
-    const pool = [...entries];
-    while (newWinners.length < gw.winners && pool.length > 0) {
-      const idx = Math.floor(Math.random() * pool.length);
-      newWinners.push(pool[idx]);
-      pool.splice(idx, 1);
-    }
-
-    if (!newWinners.length) return m.reply({ embeds: [errE('❌ No valid entries.')] });
-
-    gw.winnerIds = newWinners;
-    saveGiveawayConfig(activeGiveaways);
-
-    const channel = guild.channels.cache.get(gw.channelId);
-    if (channel) {
-      channel.send({
-        content: `🔄 **Re-roll!** New winners for **${gw.prize}**: ${newWinners.map(x => `<@${x}>`).join(', ')}`
-      }).catch(()=>{});
-    }
-    m.reply({ embeds: [okE('✅ Re-rolled', `New winners: ${newWinners.map(x => `<@${x}>`).join(', ')}`)] });
-  }
-};
+  const channel = m.guild.channels.cache.get(gw.channelId);
+  if (channel) channel.send({ content: `🔄 **Re-roll!** New winners for **${gw.prize}**: ${newWinners.map(x => `<@${x}>`).join(', ')}` }).catch(()=>{});
+  m.reply({ embeds: [okE('✅ Re-rolled', `New winners: ${newWinners.map(x => `<@${x}>`).join(', ')}`)] });
+}};
 
 /* ---------- VERIFY ---------- */
 commands.verifypanel = { cat: 'Verify', desc: 'Send verification panel', async run(m) {
@@ -675,7 +726,6 @@ commands.applypanel = { cat: 'Verify', desc: 'Send apply staff panel', usage: 'a
     .setTitle('📝 Apply for Staff — 𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷')
     .setDescription(
       '**بغيتي تولي Staff فـ 𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷؟**\n\n' +
-      'اختار النوع اللي بغيتي تقدم عليه:\n\n' +
       '🎮 **Apply Staff Minecraft**\n' +
       '💬 **Apply Staff Discord**\n\n' +
       '**كيفاش كيخدم؟**\n' +
@@ -698,20 +748,15 @@ commands.applypanel = { cat: 'Verify', desc: 'Send apply staff panel', usage: 'a
 }};
 
 /* ============================================================
- *  ⭐ Staff Info
+ *  Staff Info
  * ============================================================ */
 function buildStaffInfoEmbeds(guild) {
   const embeds = [];
-
   const header = new EmbedBuilder()
     .setColor(0x5865f2)
     .setTitle('🎖️ Staff Roles — 𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷')
-    .setDescription(
-      'جميع الرتب الإدارية مع **الأسماء** و**الـ IDs** و**الصلاحيات**.\n' +
-      'مرتبة من **الأدنى (#1)** إلى **الأعلى (#8)**.\n\n' +
-      '🔇 `Mute` • ➡️ `Move` • ⏳ `Timeout` • ✏️ `Nick` • 👢 `Kick` • 🔨 `Ban` • 🎁 `Giveaway`'
-    )
-    .setFooter({ text: `Total: ${STAFF_ROLES.length} roles • ${guild.name}` })
+    .setDescription('جميع الرتب الإدارية • مرتبة من #1 (الأدنى) إلى #8 (الأعلى)')
+    .setFooter({ text: `Total: ${STAFF_ROLES.length} roles` })
     .setTimestamp();
   embeds.push(header);
 
@@ -742,14 +787,10 @@ function buildStaffInfoEmbeds(guild) {
     )
     .setTimestamp();
   embeds.push(logs);
-
   return embeds;
 }
 
-commands.staffinfo = {
-  cat: 'Utility', desc: 'Show all staff roles', usage: 'staffinfo',
-  async run(m) { await m.reply({ embeds: buildStaffInfoEmbeds(m.guild) }); }
-};
+commands.staffinfo = { cat: 'Utility', desc: 'Show all staff roles', async run(m) { await m.reply({ embeds: buildStaffInfoEmbeds(m.guild) }); }};
 commands.staff = commands.staffinfo;
 commands['roles-info'] = commands.staffinfo;
 
@@ -1221,11 +1262,8 @@ client.once('ready', async () => {
   console.log(`[READY] Logged in as ${client.user.tag}`);
   console.log(`[READY] Guilds: ${client.guilds.cache.size}`);
   console.log(`[READY] Staff roles: ${STAFF_ROLES.length}`);
-  console.log(`[READY] Mute Log: ${MUTE_LOG_CHANNEL_ID}`);
-  console.log(`[READY] Move Log: ${MOVE_LOG_CHANNEL_ID}`);
-  console.log(`[READY] Ban Log: ${BAN_LOG_CHANNEL_ID}`);
-  console.log(`[READY] Timeout Log: ${TIMEOUT_LOG_CHANNEL_ID}`);
-  console.log(`[READY] Nickname Log: ${NICKNAME_LOG_CHANNEL_ID}`);
+  console.log(`[READY] Bot whitelist: ${Object.keys(botWhitelist.bots).length} bots`);
+  console.log(`[READY] Bot protection code set: ${BOT_WHITELIST_CODE ? '✅' : '❌'}`);
   for (const [, guild] of client.guilds.cache) {
     const ch = guild.channels.cache.get(WELCOME_CHANNEL_ID);
     if (ch) {
@@ -1242,13 +1280,51 @@ client.once('ready', async () => {
 });
 
 /* ============================================================
- *             EVENT: WELCOME
+ *  EVENT: MEMBER JOIN — Anti-bot protection + Welcome
  * ============================================================ */
 client.on('guildMemberAdd', async member => {
-  console.log(`[WELCOME] ➕ ${member.user.tag} (${member.id})`);
+  console.log(`[JOIN] ➕ ${member.user.tag} (${member.id}) — Bot: ${member.user.bot}`);
+
+  /* === ANTI-BOT: Auto-ban any bot that isn't whitelisted === */
+  if (member.user.bot) {
+    // Don't ban self
+    if (member.id === client.user.id) return;
+
+    if (isBotWhitelisted(member.id)) {
+      console.log(`[ANTI-BOT] ✅ Whitelisted bot joined: ${member.user.tag}`);
+      return;
+    }
+
+    console.log(`[ANTI-BOT] 🔨 Banning unauthorized bot: ${member.user.tag}`);
+    try {
+      await member.ban({
+        reason: 'Unauthorized bot — Auto-ban by anti-bot system. Use !wyh to whitelist.',
+        deleteMessageSeconds: 3600
+      });
+
+      const e = errE('🔨 Unauthorized Bot Banned').addFields(
+        { name: 'Bot', value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
+        { name: 'Reason', value: 'Auto-ban (not whitelisted)', inline: true },
+        { name: 'Hint', value: 'Use `!wyh <botId>` to whitelist', inline: false }
+      );
+      sendLog(member.guild, BAN_LOG_CHANNEL_ID, e);
+    } catch (err) {
+      console.error(`[ANTI-BOT] ❌ Failed to ban ${member.user.tag}:`, err.message);
+      // Notify admins if ban failed
+      const e = errE('⚠️ Failed to Ban Bot').addFields(
+        { name: 'Bot', value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
+        { name: 'Error', value: err.message, inline: true },
+        { name: 'Action Needed', value: 'Manual ban required — check bot permissions', inline: false }
+      );
+      sendLog(member.guild, BAN_LOG_CHANNEL_ID, e);
+    }
+    return; // Don't send welcome to bots
+  }
+
+  /* === Regular member === */
   if (UNVERIFIED_ROLE_ID) {
     try { await member.roles.add(UNVERIFIED_ROLE_ID, 'Auto role on join'); }
-    catch (e) { console.error(`[WELCOME] ❌ unverified role:`, e.message); }
+    catch (e) { console.error(`[JOIN] ❌ unverified role:`, e.message); }
   }
   joinLog.push(Date.now());
   while (joinLog.length && Date.now() - joinLog[0] > 10000) joinLog.shift();
@@ -1263,10 +1339,78 @@ client.on('guildMemberAdd', async member => {
  *             EVENT: INTERACTION
  * ============================================================ */
 client.on(Events.InteractionCreate, async interaction => {
-  if (!interaction.isButton()) return;
-  const id = interaction.customId;
 
-  if (id === 'verify_button') {
+  /* ==================== MODAL SUBMIT ==================== */
+  if (interaction.isModalSubmit()) {
+    const id = interaction.customId;
+
+    /* --- WYH modal --- */
+    if (id.startsWith('wyh_modal_')) {
+      const targetId = id.replace('wyh_modal_', '');
+      const code = interaction.fields.getTextInputValue('wyh_code').trim();
+
+      if (code !== BOT_WHITELIST_CODE) {
+        return interaction.reply({
+          embeds: [errE('❌ Invalid Code', 'الكود اللي دخلتي ماشي صحيح.')],
+          ephemeral: true
+        });
+      }
+
+      const tier = getStaffTier(interaction.member);
+      if (!tier || tier.rank < 3) {
+        return interaction.reply({ embeds: [errE('❌ No permission (Admin+).')], ephemeral: true });
+      }
+
+      // Verify target is a bot
+      const user = await client.users.fetch(targetId).catch(()=>null);
+      if (!user || !user.bot) {
+        return interaction.reply({
+          embeds: [errE('❌ Not a Bot', 'الـ ID اللي عطيتي ماشي ديال بوت.')],
+          ephemeral: true
+        });
+      }
+
+      // Already whitelisted?
+      if (isBotWhitelisted(targetId)) {
+        return interaction.reply({
+          embeds: [infoE('ℹ️ Already Whitelisted', `<@${targetId}> ديجا فـ الـ whitelist.`)],
+          ephemeral: true
+        });
+      }
+
+      // Add to whitelist
+      botWhitelist.bots[targetId] = {
+        addedBy: interaction.user.tag,
+        addedById: interaction.user.id,
+        addedAt: Date.now()
+      };
+      saveBotWhitelist(botWhitelist);
+
+      const e = okE('✅ Bot Whitelisted').addFields(
+        { name: 'Bot', value: `<@${targetId}> (\`${targetId}\`)`, inline: true },
+        { name: 'By', value: `${interaction.user.tag} (${tier.label})`, inline: true }
+      );
+
+      await interaction.reply({ embeds: [
+        okE('✅ Bot Whitelisted',
+          `**${user.tag}** (\`${targetId}\`) تمت إضافتو للـ whitelist.\n` +
+          `دابا إلا دخل السيرفر ما غاديش يتبان أوتوماتيكياً.`
+        )
+      ], ephemeral: true });
+
+      // Log it
+      sendLog(interaction.guild, BAN_LOG_CHANNEL_ID, e);
+      console.log(`[WYH] ✅ ${user.tag} (${targetId}) whitelisted by ${interaction.user.tag}`);
+      return;
+    }
+    return;
+  }
+
+  /* ==================== BUTTONS ==================== */
+  if (!interaction.isButton()) return;
+  const btnId = interaction.customId;
+
+  if (btnId === 'verify_button') {
     try {
       const guild = interaction.guild;
       const member = await guild.members.fetch(interaction.user.id);
@@ -1284,9 +1428,9 @@ client.on(Events.InteractionCreate, async interaction => {
     return;
   }
 
-  if (id === 'apply_minecraft' || id === 'apply_discord') {
+  if (btnId === 'apply_minecraft' || btnId === 'apply_discord') {
     const userId = interaction.user.id;
-    const isMc = id === 'apply_minecraft';
+    const isMc = btnId === 'apply_minecraft';
     const type = isMc ? 'Minecraft Staff' : 'Discord Staff';
     const questions = isMc ? APPLY_QUESTIONS_MC : APPLY_QUESTIONS_DISCORD;
 
@@ -1313,10 +1457,10 @@ client.on(Events.InteractionCreate, async interaction => {
     return;
   }
 
-  if (id.startsWith('apply_accept_')) {
+  if (btnId.startsWith('apply_accept_')) {
     const tier = getStaffTier(interaction.member);
     if (!tier || tier.rank < 3) return interaction.reply({ embeds: [errE('❌ Admin only.')], ephemeral: true });
-    const userId = id.replace('apply_accept_', '');
+    const userId = btnId.replace('apply_accept_', '');
     try {
       const user = await client.users.fetch(userId).catch(()=>null);
       if (user) await user.send({ embeds: [okE('🎉 Congratulations!', `**تم قبولك فـ Staff 𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷!**`)] }).catch(()=>{});
@@ -1326,10 +1470,10 @@ client.on(Events.InteractionCreate, async interaction => {
     return;
   }
 
-  if (id.startsWith('apply_reject_')) {
+  if (btnId.startsWith('apply_reject_')) {
     const tier = getStaffTier(interaction.member);
     if (!tier || tier.rank < 3) return interaction.reply({ embeds: [errE('❌ Admin only.')], ephemeral: true });
-    const userId = id.replace('apply_reject_', '');
+    const userId = btnId.replace('apply_reject_', '');
     try {
       const user = await client.users.fetch(userId).catch(()=>null);
       if (user) await user.send({ embeds: [errE('❌ Application Result', `**تم رفض طلبك.**`)] }).catch(()=>{});
@@ -1341,7 +1485,7 @@ client.on(Events.InteractionCreate, async interaction => {
 });
 
 /* ============================================================
- *             EVENT: MESSAGE REACTION (Giveaway entries)
+ *             EVENT: MESSAGE REACTION (Giveaway)
  * ============================================================ */
 client.on('messageReactionAdd', async (reaction, user) => {
   try {
@@ -1354,7 +1498,6 @@ client.on('messageReactionAdd', async (reaction, user) => {
     if (!gw.entries.includes(user.id)) {
       gw.entries.push(user.id);
       saveGiveawayConfig(activeGiveaways);
-      // Update entries count in embed
       const guild = client.guilds.cache.get(gw.guildId);
       const channel = guild?.channels.cache.get(gw.channelId);
       const msg = await channel?.messages.fetch(reaction.message.id).catch(()=>null);
@@ -1362,13 +1505,11 @@ client.on('messageReactionAdd', async (reaction, user) => {
     }
   } catch (e) { console.error('[GIVEAWAY] reaction add:', e.message); }
 });
-
 client.on('messageReactionRemove', async (reaction, user) => {
   try {
     if (user.bot) return;
     if (reaction.partial) await reaction.fetch().catch(()=>null);
     if (reaction.emoji.name !== '🎉') return;
-
     const gw = activeGiveaways[reaction.message.id];
     if (!gw || gw.ended) return;
     gw.entries = gw.entries.filter(id => id !== user.id);
@@ -1531,7 +1672,7 @@ client.on('messageCreate', async message => {
   const args = message.content.slice(PREFIX.length).trim().split(/\s+/);
   const name = args.shift().toLowerCase();
 
-  // Special: "roll all info" / "role all info"
+  // Special multi-word: "roll all info" / "role all info"
   if (name === 'roll' && args[0]?.toLowerCase() === 'all' && args[1]?.toLowerCase() === 'info')
     return commands.staffinfo.run(message, []);
   if (name === 'role' && args[0]?.toLowerCase() === 'all' && args[1]?.toLowerCase() === 'info')
