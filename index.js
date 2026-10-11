@@ -30,6 +30,7 @@ const MC_STORE_URL             = process.env.MC_STORE_URL || 'https://store.khob
 const DATA_DIR                 = process.env.DATA_DIR || __dirname;
 const VOICE_CFG_FILE           = path.join(DATA_DIR, 'voice-config.json');
 const MUTE_CFG_FILE            = path.join(DATA_DIR, 'mute-config.json');
+const GIVEAWAY_CFG_FILE        = path.join(DATA_DIR, 'giveaway-config.json');
 const RECONNECT_DELAY          = 5000;
 const VERIFY_CHANNEL_ID        = process.env.VERIFY_CHANNEL_ID || '1558503393226530947';
 const VERIFY_IMAGE             = process.env.VERIFY_IMAGE || '';
@@ -65,7 +66,7 @@ const client = new Client({
   partials: [Partials.Channel, Partials.Message, Partials.GuildMember, Partials.User, Partials.Reaction]
 });
 
-const C = { ok: 0x57f287, err: 0xed4245, info: 0x5865f2, warn: 0xfee75c };
+const C = { ok: 0x57f287, err: 0xed4245, info: 0x5865f2, warn: 0xfee75c, giveaway: 0xeb459e };
 
 /* ===================== APPLY QUESTIONS ===================== */
 const APPLY_QUESTIONS_MC = [
@@ -92,14 +93,14 @@ const dmApplications = new Map();
  *  STAFF TIER SYSTEM
  * ============================================================ */
 const STAFF_ROLES = [
-  { id: HELPER_ROLE_ID,  rank: 1, maxMute: 10,  minMute: 5, canMove: false, canTimeout: false, canNickname: false, canBan: false, canKick: false, label: 'Helper' },
-  { id: MOD_ROLE_ID,     rank: 2, maxMute: 10,  minMute: 5, canMove: true,  canTimeout: false, canNickname: false, canBan: false, canKick: false, label: 'Moderator' },
-  { id: ADMIN_ROLE_ID,   rank: 3, maxMute: 30,  minMute: 5, canMove: true,  canTimeout: false, canNickname: false, canBan: false, canKick: true,  label: 'Admin' },
-  { id: SENIOR_ROLE_ID,  rank: 4, maxMute: 60,  minMute: 5, canMove: true,  canTimeout: false, canNickname: false, canBan: false, canKick: true,  label: 'Senior' },
-  { id: MANAGER_ROLE_ID, rank: 5, maxMute: -1,  minMute: 5, canMove: true,  canTimeout: false, canNickname: false, canBan: false, canKick: true,  label: 'Manager' },
-  { id: HEAD_ROLE_ID,    rank: 6, maxMute: -1,  minMute: 5, canMove: true,  canTimeout: true,  canNickname: false, canBan: false, canKick: true,  label: 'Head Admin' },
-  { id: COOWNER_ROLE_ID, rank: 7, maxMute: -1,  minMute: 5, canMove: true,  canTimeout: true,  canNickname: true,  canBan: false, canKick: true,  label: 'Co-Owner' },
-  { id: OWNER_ROLE_ID,   rank: 8, maxMute: -1,  minMute: 5, canMove: true,  canTimeout: true,  canNickname: true,  canBan: true,  canKick: true,  label: 'Owner' }
+  { id: HELPER_ROLE_ID,  rank: 1, maxMute: 10,  minMute: 5, canMove: false, canTimeout: false, canNickname: false, canBan: false, canKick: false, canGiveaway: false, label: 'Helper' },
+  { id: MOD_ROLE_ID,     rank: 2, maxMute: 10,  minMute: 5, canMove: true,  canTimeout: false, canNickname: false, canBan: false, canKick: false, canGiveaway: true,  label: 'Moderator' },
+  { id: ADMIN_ROLE_ID,   rank: 3, maxMute: 30,  minMute: 5, canMove: true,  canTimeout: false, canNickname: false, canBan: false, canKick: true,  canGiveaway: true,  label: 'Admin' },
+  { id: SENIOR_ROLE_ID,  rank: 4, maxMute: 60,  minMute: 5, canMove: true,  canTimeout: false, canNickname: false, canBan: false, canKick: true,  canGiveaway: true,  label: 'Senior' },
+  { id: MANAGER_ROLE_ID, rank: 5, maxMute: -1,  minMute: 5, canMove: true,  canTimeout: false, canNickname: false, canBan: false, canKick: true,  canGiveaway: true,  label: 'Manager' },
+  { id: HEAD_ROLE_ID,    rank: 6, maxMute: -1,  minMute: 5, canMove: true,  canTimeout: true,  canNickname: false, canBan: false, canKick: true,  canGiveaway: true,  label: 'Head Admin' },
+  { id: COOWNER_ROLE_ID, rank: 7, maxMute: -1,  minMute: 5, canMove: true,  canTimeout: true,  canNickname: true,  canBan: false, canKick: true,  canGiveaway: true,  label: 'Co-Owner' },
+  { id: OWNER_ROLE_ID,   rank: 8, maxMute: -1,  minMute: 5, canMove: true,  canTimeout: true,  canNickname: true,  canBan: true,  canKick: true,  canGiveaway: true,  label: 'Owner' }
 ];
 
 function getStaffTier(member) {
@@ -141,7 +142,6 @@ function scheduleUnmute(key) {
   const t = setTimeout(() => doUnmute(key).catch(()=>{}), delay);
   muteTimers.set(key, t);
 }
-
 async function doUnmute(key) {
   const data = activeMutes[key];
   if (!data) return;
@@ -160,7 +160,6 @@ async function doUnmute(key) {
     ));
   } catch (e) { console.error('[MUTE] auto-unmute:', e.message); }
 }
-
 async function restoreMutes() {
   for (const key of Object.keys(activeMutes)) {
     const data = activeMutes[key];
@@ -172,6 +171,123 @@ async function restoreMutes() {
         await member.voice.setMute(true, 'Restoring mute').catch(()=>{});
       scheduleUnmute(key);
     } catch (e) { console.error('[MUTE] restore:', e.message); }
+  }
+}
+
+/* ===================== GIVEAWAY STORAGE ===================== */
+/* Structure: {
+ *   messageId: {
+ *     guildId, channelId, hostId, prize, winners, imageURL,
+ *     endsAt, ended, entries: [userIds], winnerIds: []
+ *   }
+ * }
+ */
+function loadGiveawayConfig() {
+  try { if (fs.existsSync(GIVEAWAY_CFG_FILE)) return JSON.parse(fs.readFileSync(GIVEAWAY_CFG_FILE, 'utf8')); }
+  catch (e) { console.error('[GIVEAWAY CFG] load:', e.message); }
+  return {};
+}
+function saveGiveawayConfig(data) {
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(GIVEAWAY_CFG_FILE, JSON.stringify(data, null, 2));
+  } catch (e) { console.error('[GIVEAWAY CFG] save:', e.message); }
+}
+const activeGiveaways = loadGiveawayConfig();
+const giveawayTimers  = new Map();
+
+function buildGiveawayEmbed(gw, ended = false) {
+  const timeLeft = Math.max(0, gw.endsAt - Date.now());
+  const totalSec = Math.floor(timeLeft / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+
+  const embed = new EmbedBuilder()
+    .setColor(ended ? C.err : C.giveaway)
+    .setTitle(ended ? '🎉 GIVEAWAY ENDED' : '🎉 GIVEAWAY!')
+    .setDescription(
+      `## ${gw.prize}\n\n` +
+      `🎁 **Winners:** ${gw.winners}\n` +
+      `👥 **Entries:** ${gw.entries.length}\n` +
+      `👑 **Hosted by:** <@${gw.hostId}>\n\n` +
+      (ended
+        ? `**Ended** <t:${Math.floor(gw.endsAt/1000)}:R>\n` +
+          (gw.winnerIds.length
+            ? `**Winners:** ${gw.winnerIds.map(id => `<@${id}>`).join(', ')}`
+            : `**Winners:** ❌ No valid entries`)
+        : `⏳ **Ends:** <t:${Math.floor(gw.endsAt/1000)}:R> (<t:${Math.floor(gw.endsAt/1000)}:f>)\n` +
+          `**Time left:** ${h > 0 ? `${h}h ` : ''}${m}m ${s}s`)
+    )
+    .setFooter({ text: ended ? 'Giveaway finished' : 'React with 🎉 to enter!' })
+    .setTimestamp();
+
+  if (gw.imageURL) embed.setImage(gw.imageURL);
+  return embed;
+}
+
+async function endGiveaway(messageId) {
+  const gw = activeGiveaways[messageId];
+  if (!gw || gw.ended) return;
+
+  gw.ended = true;
+  saveGiveawayConfig(activeGiveaways);
+  if (giveawayTimers.has(messageId)) { clearTimeout(giveawayTimers.get(messageId)); giveawayTimers.delete(messageId); }
+
+  const guild = client.guilds.cache.get(gw.guildId);
+  if (!guild) return;
+  const channel = guild.channels.cache.get(gw.channelId);
+  if (!channel) return;
+  const msg = await channel.messages.fetch(messageId).catch(()=>null);
+  if (!msg) return;
+
+  // Pick winners
+  const entries = [...new Set(gw.entries)].filter(id => {
+    // Remove bots and left users
+    const mem = guild.members.cache.get(id);
+    return mem && !mem.user.bot;
+  });
+
+  const winners = [];
+  const pool = [...entries];
+  while (winners.length < gw.winners && pool.length > 0) {
+    const idx = Math.floor(Math.random() * pool.length);
+    winners.push(pool[idx]);
+    pool.splice(idx, 1);
+  }
+
+  gw.winnerIds = winners;
+  saveGiveawayConfig(activeGiveaways);
+
+  // Edit message
+  try {
+    await msg.edit({
+      content: winners.length ? `🎉 Congratulations ${winners.map(id => `<@${id}>`).join(', ')}!` : '❌ No valid entries.',
+      embeds: [buildGiveawayEmbed(gw, true)],
+      components: []
+    });
+  } catch (e) { console.error('[GIVEAWAY] edit error:', e.message); }
+
+  // Notify in channel
+  if (winners.length) {
+    channel.send({ content: `🎉 ${winners.map(id => `<@${id}>`).join(', ')} won **${gw.prize}**!` }).catch(()=>{});
+  } else {
+    channel.send({ content: `❌ No valid entries for **${gw.prize}**.` }).catch(()=>{});
+  }
+
+  console.log(`[GIVEAWAY] Ended ${messageId} — winners: ${winners.join(', ') || 'none'}`);
+}
+
+async function restoreGiveaways() {
+  for (const [messageId, gw] of Object.entries(activeGiveaways)) {
+    if (gw.ended) continue;
+    const delay = gw.endsAt - Date.now();
+    if (delay <= 0) {
+      endGiveaway(messageId).catch(()=>{});
+    } else {
+      const t = setTimeout(() => endGiveaway(messageId).catch(()=>{}), delay);
+      giveawayTimers.set(messageId, t);
+    }
   }
 }
 
@@ -212,6 +328,13 @@ function fmtMinutes(mins) {
   if (mins < 60) return `${mins} min`;
   const h = Math.floor(mins / 60), m = mins % 60;
   return m > 0 ? `${h}h ${m}m` : `${h}h`;
+}
+function parseDuration(str) {
+  if (!str) return null;
+  const m = String(str).match(/^(\d+)(s|m|h|d|w)$/i);
+  if (!m) return null;
+  const mult = { s: 1e3, m: 6e4, h: 36e5, d: 864e5, w: 6048e5 }[m[2].toLowerCase()];
+  return parseInt(m[1]) * mult;
 }
 async function resolveMember(msg, str) {
   if (!str) return null;
@@ -325,6 +448,169 @@ async function sendWelcome(guild, member) {
  * ============================================================ */
 const commands = {};
 
+/* ============================================================
+ *  ⭐ !giveaway — Advanced Giveaway System
+ *  Usage: !giveaway <time> <winners> <prize> [imageURL]
+ *  Example: !giveaway 10m 1 Nitro https://i.imgur.com/xxx.png
+ * ============================================================ */
+commands.giveaway = {
+  cat: 'Fun',
+  desc: 'Start a giveaway with image and multiple winners',
+  usage: 'giveaway <time> <winners> <prize...> [imageURL]',
+  async run(m, a) {
+    const tier = getStaffTier(m.member);
+    if (!tier || !tier.canGiveaway) {
+      return m.reply({ embeds: [errE('❌ No permission.', 'خاصك تكون Moderator ولا فوق.')] });
+    }
+
+    if (a.length < 3) {
+      return m.reply({ embeds: [
+        errE('📖 Usage',
+          '`!giveaway <time> <winners> <prize> [imageURL]`\n\n' +
+          '**Examples:**\n' +
+          '`!giveaway 10m 1 Nitro`\n' +
+          '`!giveaway 1h 3 $50 Gift Card`\n' +
+          '`!giveaway 1d 1 Minecraft Rank https://i.imgur.com/xxx.png`\n\n' +
+          '**Time formats:** `s` (seconds), `m` (minutes), `h` (hours), `d` (days), `w` (weeks)'
+        )
+      ] });
+    }
+
+    const durationMs = parseDuration(a[0]);
+    if (!durationMs) return m.reply({ embeds: [errE('❌ Time format invalid.', 'Use: `10m`, `1h`, `1d`, `1w`')] });
+
+    const winners = parseInt(a[1], 10);
+    if (isNaN(winners) || winners < 1 || winners > 50) {
+      return m.reply({ embeds: [errE('❌ Winners must be between 1 and 50.')] });
+    }
+
+    let rest = a.slice(2);
+    let imageURL = '';
+
+    // If last arg looks like an image URL → use it
+    if (rest.length > 1 && /^https?:\/\/\S+/i.test(rest[rest.length - 1])) {
+      imageURL = rest.pop();
+    }
+    // Or check attachments
+    if (!imageURL && m.attachments.size) imageURL = m.attachments.first().url;
+
+    const prize = rest.join(' ').trim();
+    if (!prize) return m.reply({ embeds: [errE('❌ Provide a prize.')] });
+
+    const endsAt = Date.now() + durationMs;
+
+    // Build the giveaway embed
+    const gw = {
+      guildId: m.guild.id,
+      channelId: m.channel.id,
+      hostId: m.author.id,
+      prize,
+      winners,
+      imageURL,
+      endsAt,
+      ended: false,
+      entries: [],
+      winnerIds: []
+    };
+
+    const embed = buildGiveawayEmbed(gw, false);
+
+    let msg;
+    try {
+      msg = await m.channel.send({ embeds: [embed] });
+      await msg.react('🎉');
+    } catch (e) {
+      return m.reply({ embeds: [errE('❌ Failed to send giveaway', e.message)] });
+    }
+
+    // Save
+    activeGiveaways[msg.id] = gw;
+    saveGiveawayConfig(activeGiveaways);
+
+    // Schedule end
+    const timer = setTimeout(() => endGiveaway(msg.id).catch(()=>{}), durationMs);
+    giveawayTimers.set(msg.id, timer);
+
+    console.log(`[GIVEAWAY] Started ${msg.id} — ${prize} — ends in ${fmtDur(durationMs)}`);
+
+    // Confirm to host (ephemeral-style, but message-based)
+    m.reply({ embeds: [
+      okE('✅ Giveaway Started!', 
+        `**Prize:** ${prize}\n` +
+        `**Winners:** ${winners}\n` +
+        `**Ends in:** ${fmtDur(durationMs)}\n` +
+        `**Message:** [Jump](${msg.url})\n` +
+        `**Message ID:** \`${msg.id}\``
+      )
+    ] }).catch(()=>{});
+  }
+};
+
+/* ============================================================
+ *  !gend — Force-end a giveaway (by message ID)
+ * ============================================================ */
+commands.gend = {
+  cat: 'Fun',
+  desc: 'Force-end a giveaway',
+  usage: 'gend <messageID>',
+  async run(m, a) {
+    const tier = getStaffTier(m.member);
+    if (!tier || !tier.canGiveaway) return m.reply({ embeds: [errE('❌ No permission.')] });
+    const id = (a[0] || '').trim();
+    if (!id) return m.reply({ embeds: [errE('Usage: `!gend <messageID>`')] });
+    const gw = activeGiveaways[id];
+    if (!gw) return m.reply({ embeds: [errE('❌ Giveaway not found.')] });
+    if (gw.ended) return m.reply({ embeds: [errE('❌ Already ended.')] });
+    await endGiveaway(id);
+    m.reply({ embeds: [okE('✅ Ended', `Giveaway \`${id}\` ended.`)] }).catch(()=>{});
+  }
+};
+
+/* ============================================================
+ *  !greroll — Re-roll winners
+ * ============================================================ */
+commands.greroll = {
+  cat: 'Fun',
+  desc: 'Re-roll winners of an ended giveaway',
+  usage: 'greroll <messageID>',
+  async run(m, a) {
+    const tier = getStaffTier(m.member);
+    if (!tier || !tier.canGiveaway) return m.reply({ embeds: [errE('❌ No permission.')] });
+    const id = (a[0] || '').trim();
+    if (!id) return m.reply({ embeds: [errE('Usage: `!greroll <messageID>`')] });
+    const gw = activeGiveaways[id];
+    if (!gw) return m.reply({ embeds: [errE('❌ Not found.')] });
+    if (!gw.ended) return m.reply({ embeds: [errE('❌ Still running.')] });
+
+    const guild = m.guild;
+    const entries = [...new Set(gw.entries)].filter(uid => {
+      const mem = guild.members.cache.get(uid);
+      return mem && !mem.user.bot;
+    });
+
+    const newWinners = [];
+    const pool = [...entries];
+    while (newWinners.length < gw.winners && pool.length > 0) {
+      const idx = Math.floor(Math.random() * pool.length);
+      newWinners.push(pool[idx]);
+      pool.splice(idx, 1);
+    }
+
+    if (!newWinners.length) return m.reply({ embeds: [errE('❌ No valid entries.')] });
+
+    gw.winnerIds = newWinners;
+    saveGiveawayConfig(activeGiveaways);
+
+    const channel = guild.channels.cache.get(gw.channelId);
+    if (channel) {
+      channel.send({
+        content: `🔄 **Re-roll!** New winners for **${gw.prize}**: ${newWinners.map(x => `<@${x}>`).join(', ')}`
+      }).catch(()=>{});
+    }
+    m.reply({ embeds: [okE('✅ Re-rolled', `New winners: ${newWinners.map(x => `<@${x}>`).join(', ')}`)] });
+  }
+};
+
 /* ---------- VERIFY ---------- */
 commands.verifypanel = { cat: 'Verify', desc: 'Send verification panel', async run(m) {
   if (!has(m.member, PermissionFlagsBits.Administrator)) return m.reply({ embeds: [errE('❌ Admin only.')] });
@@ -412,66 +698,47 @@ commands.applypanel = { cat: 'Verify', desc: 'Send apply staff panel', usage: 'a
 }};
 
 /* ============================================================
- *  ⭐ !staffinfo — Show ALL staff roles info
- *  Aliases: !rollinfo all, !roleinfo all, !roles-info all
+ *  ⭐ Staff Info
  * ============================================================ */
 function buildStaffInfoEmbeds(guild) {
   const embeds = [];
 
-  // === Header embed ===
   const header = new EmbedBuilder()
     .setColor(0x5865f2)
     .setTitle('🎖️ Staff Roles — 𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷')
     .setDescription(
-      'جميع الرتب الإدارية مع **الأسماء** و**الـ IDs** و**الصلاحيات** لكل واحدة.\n' +
-      'الرتب مرتبة من **الأدنى (#1)** إلى **الأعلى (#8)**.\n\n' +
-      '**Legend:**\n' +
-      '🔇 `Mute` = مدة الـ Voice Mute المسموحة\n' +
-      '➡️ `Move` = نقل الأعضاء بين الرومات الصوتية\n' +
-      '⏳ `Timeout` = Discord Timeout (كتابة + صوت)\n' +
-      '✏️ `Nick` = تبديل النيك نيم\n' +
-      '👢 `Kick` = طرد عضو\n' +
-      '🔨 `Ban` = Ban دائم\n'
+      'جميع الرتب الإدارية مع **الأسماء** و**الـ IDs** و**الصلاحيات**.\n' +
+      'مرتبة من **الأدنى (#1)** إلى **الأعلى (#8)**.\n\n' +
+      '🔇 `Mute` • ➡️ `Move` • ⏳ `Timeout` • ✏️ `Nick` • 👢 `Kick` • 🔨 `Ban` • 🎁 `Giveaway`'
     )
-    .setFooter({ text: `Total: ${STAFF_ROLES.length} roles • Requested by ${guild.name}` })
+    .setFooter({ text: `Total: ${STAFF_ROLES.length} roles • ${guild.name}` })
     .setTimestamp();
   embeds.push(header);
 
-  // === One field per role (fits in one embed if compact) ===
-  const details = new EmbedBuilder()
-    .setColor(0x2b2d31)
-    .setTitle('📋 Roles Details');
-
+  const details = new EmbedBuilder().setColor(0x2b2d31).setTitle('📋 Roles Details');
   for (const r of STAFF_ROLES) {
-    // Try to get real role name from guild
     const realRole = guild.roles.cache.get(r.id);
     const displayName = realRole ? realRole.name : r.label;
-
     const maxMuteStr = r.maxMute === -1 ? '`Permanent`' : `\`${r.maxMute}m\``;
-
     const value =
-      `**ID:** \`${r.id}\`\n` +
-      `**Rank:** \`#${r.rank}\`\n` +
-      `**Max Mute:** ${maxMuteStr} • **Min Mute:** \`${r.minMute}m\`\n` +
-      `**Move:** ${r.canMove ? '✅' : '❌'} • **Timeout:** ${r.canTimeout ? '✅' : '❌'}\n` +
-      `**Nickname:** ${r.canNickname ? '✅' : '❌'} • **Kick:** ${r.canKick ? '✅' : '❌'} • **Ban:** ${r.canBan ? '✅' : '❌'}`;
-
+      `**ID:** \`${r.id}\` • **Rank:** \`#${r.rank}\`\n` +
+      `**Max Mute:** ${maxMuteStr} • **Min:** \`${r.minMute}m\`\n` +
+      `**Move:** ${r.canMove ? '✅' : '❌'} • **Timeout:** ${r.canTimeout ? '✅' : '❌'} • **Nick:** ${r.canNickname ? '✅' : '❌'}\n` +
+      `**Kick:** ${r.canKick ? '✅' : '❌'} • **Ban:** ${r.canBan ? '✅' : '❌'} • **Giveaway:** ${r.canGiveaway ? '✅' : '❌'}`;
     details.addFields({ name: `#${r.rank} — ${displayName}`, value, inline: false });
   }
-
   embeds.push(details);
 
-  // === Log channels embed ===
   const logs = new EmbedBuilder()
     .setColor(0x57f287)
     .setTitle('📜 Log Channels')
     .addFields(
-      { name: 'Ban Logs',      value: BAN_LOG_CHANNEL_ID ? `<#${BAN_LOG_CHANNEL_ID}>` : '—', inline: true },
-      { name: 'Mute Logs',     value: MUTE_LOG_CHANNEL_ID ? `<#${MUTE_LOG_CHANNEL_ID}>` : '—', inline: true },
-      { name: 'Move Logs',     value: MOVE_LOG_CHANNEL_ID ? `<#${MOVE_LOG_CHANNEL_ID}>` : '—', inline: true },
-      { name: 'Timeout Logs',  value: TIMEOUT_LOG_CHANNEL_ID ? `<#${TIMEOUT_LOG_CHANNEL_ID}>` : '—', inline: true },
-      { name: 'Nickname Logs', value: NICKNAME_LOG_CHANNEL_ID ? `<#${NICKNAME_LOG_CHANNEL_ID}>` : '—', inline: true },
-      { name: 'Role Logs',     value: ROLE_LOG_CHANNEL_ID ? `<#${ROLE_LOG_CHANNEL_ID}>` : '—', inline: true }
+      { name: 'Ban',      value: BAN_LOG_CHANNEL_ID ? `<#${BAN_LOG_CHANNEL_ID}>` : '—', inline: true },
+      { name: 'Mute',     value: MUTE_LOG_CHANNEL_ID ? `<#${MUTE_LOG_CHANNEL_ID}>` : '—', inline: true },
+      { name: 'Move',     value: MOVE_LOG_CHANNEL_ID ? `<#${MOVE_LOG_CHANNEL_ID}>` : '—', inline: true },
+      { name: 'Timeout',  value: TIMEOUT_LOG_CHANNEL_ID ? `<#${TIMEOUT_LOG_CHANNEL_ID}>` : '—', inline: true },
+      { name: 'Nickname', value: NICKNAME_LOG_CHANNEL_ID ? `<#${NICKNAME_LOG_CHANNEL_ID}>` : '—', inline: true },
+      { name: 'Role',     value: ROLE_LOG_CHANNEL_ID ? `<#${ROLE_LOG_CHANNEL_ID}>` : '—', inline: true }
     )
     .setTimestamp();
   embeds.push(logs);
@@ -480,42 +747,23 @@ function buildStaffInfoEmbeds(guild) {
 }
 
 commands.staffinfo = {
-  cat: 'Utility',
-  desc: 'Show all staff roles with IDs and permissions',
-  usage: 'staffinfo',
-  async run(m) {
-    const embeds = buildStaffInfoEmbeds(m.guild);
-    await m.reply({ embeds });
-  }
+  cat: 'Utility', desc: 'Show all staff roles', usage: 'staffinfo',
+  async run(m) { await m.reply({ embeds: buildStaffInfoEmbeds(m.guild) }); }
 };
-// Aliases
 commands.staff = commands.staffinfo;
 commands['roles-info'] = commands.staffinfo;
 
-/* ============================================================
- *  !roleinfo — Show info for a specific role OR "all" for everything
- * ============================================================ */
-commands.roleinfo = { cat: 'Utility', desc: 'Role info (use "all" for full list)', usage: 'roleinfo <@role|roleID|all>', async run(m, a) {
+commands.roleinfo = { cat: 'Utility', desc: 'Role info (use "all")', usage: 'roleinfo <@role|roleID|all>', async run(m, a) {
   const arg = (a[0] || '').toLowerCase();
+  if (arg === 'all') return m.reply({ embeds: buildStaffInfoEmbeds(m.guild) });
 
-  // === !roleinfo all ===
-  if (arg === 'all') {
-    const embeds = buildStaffInfoEmbeds(m.guild);
-    return m.reply({ embeds });
-  }
-
-  // === !roleinfo <role> ===
   let r = m.mentions.roles.first();
-  if (!r && a[0] && /^\d{17,20}$/.test(a[0].replace(/[<@&>]/g, ''))) {
+  if (!r && a[0] && /^\d{17,20}$/.test(a[0].replace(/[<@&>]/g, '')))
     r = m.guild.roles.cache.get(a[0].replace(/[<@&>]/g, '')) || await m.guild.roles.fetch(a[0].replace(/[<@&>]/g, '')).catch(()=>null);
-  }
   if (!r) r = m.guild.roles.cache.find(x => x.name.toLowerCase() === arg);
+  if (!r) return m.reply({ embeds: [errE('Role not found.')] });
 
-  if (!r) return m.reply({ embeds: [errE('Role not found.', 'Usage: `!roleinfo <@role|roleID|all>`')] });
-
-  // Check if this role is a staff role
   const staffData = STAFF_ROLES.find(s => s.id === r.id);
-
   const e = infoE(`🏷️ ${r.name}`).addFields(
     { name: 'ID', value: `\`${r.id}\``, inline: true },
     { name: 'Color', value: r.hexColor, inline: true },
@@ -524,19 +772,16 @@ commands.roleinfo = { cat: 'Utility', desc: 'Role info (use "all" for full list)
     { name: 'Mentionable', value: r.mentionable ? '✅' : '❌', inline: true },
     { name: 'Hoisted', value: r.hoist ? '✅' : '❌', inline: true }
   );
-
-  if (staffData) {
-    e.addFields(
-      { name: '🎖️ Staff Rank', value: `#${staffData.rank} — ${staffData.label}`, inline: false },
-      { name: '🔇 Max Mute', value: fmtMinutes(staffData.maxMute), inline: true },
-      { name: '➡️ Move', value: staffData.canMove ? '✅' : '❌', inline: true },
-      { name: '⏳ Timeout', value: staffData.canTimeout ? '✅' : '❌', inline: true },
-      { name: '✏️ Nickname', value: staffData.canNickname ? '✅' : '❌', inline: true },
-      { name: '👢 Kick', value: staffData.canKick ? '✅' : '❌', inline: true },
-      { name: '🔨 Ban', value: staffData.canBan ? '✅' : '❌', inline: true }
-    );
-  }
-
+  if (staffData) e.addFields(
+    { name: '🎖️ Staff Rank', value: `#${staffData.rank} — ${staffData.label}`, inline: false },
+    { name: '🔇 Max Mute', value: fmtMinutes(staffData.maxMute), inline: true },
+    { name: '➡️ Move', value: staffData.canMove ? '✅' : '❌', inline: true },
+    { name: '⏳ Timeout', value: staffData.canTimeout ? '✅' : '❌', inline: true },
+    { name: '✏️ Nick', value: staffData.canNickname ? '✅' : '❌', inline: true },
+    { name: '👢 Kick', value: staffData.canKick ? '✅' : '❌', inline: true },
+    { name: '🔨 Ban', value: staffData.canBan ? '✅' : '❌', inline: true },
+    { name: '🎁 Giveaway', value: staffData.canGiveaway ? '✅' : '❌', inline: true }
+  );
   m.reply({ embeds: [e] });
 }};
 
@@ -547,7 +792,7 @@ commands.intents = { cat: 'Utility', desc: 'Check intents', async run(m) {
     `**Guilds**: ${client.guilds.cache.size}\n**Members**: ${m.guild.memberCount}\n**Cached**: ${m.guild.members.cache.size}\n\n**Members Intent**: ${m.guild.members.cache.size > 1 ? '✅ ON' : '❌ OFF'}`
   )] });
 }};
-commands.mytier = { cat: 'Utility', desc: 'Show your staff tier', async run(m) {
+commands.mytier = { cat: 'Utility', desc: 'Your staff tier', async run(m) {
   const t = getStaffTier(m.member);
   if (!t) return m.reply({ embeds: [errE('❌ ما عندكش رتبة staff.')] });
   m.reply({ embeds: [infoE('🎖️ Staff Tier').addFields(
@@ -557,15 +802,15 @@ commands.mytier = { cat: 'Utility', desc: 'Show your staff tier', async run(m) {
     { name: 'Move', value: t.canMove ? '✅' : '❌', inline: true },
     { name: 'Timeout', value: t.canTimeout ? '✅' : '❌', inline: true },
     { name: 'Nickname', value: t.canNickname ? '✅' : '❌', inline: true },
-    { name: 'Ban', value: t.canBan ? '✅' : '❌', inline: true }
+    { name: 'Ban', value: t.canBan ? '✅' : '❌', inline: true },
+    { name: 'Giveaway', value: t.canGiveaway ? '✅' : '❌', inline: true }
   )] });
 }};
 
 /* ---------- MODERATION ---------- */
 commands.ban = { cat: 'Moderation', desc: 'Ban', usage: 'ban <@user|userID> [reason]', async run(m, a) {
   const tier = getStaffTier(m.member);
-  if (!tier) return m.reply({ embeds: [errE('❌ No permission.')] });
-  if (!tier.canBan) return m.reply({ embeds: [errE('❌ ما عندكش صلاحية الـ ban.', 'خاصك تكون Owner ولا Administrator.')] });
+  if (!tier || !tier.canBan) return m.reply({ embeds: [errE('❌ No permission (Owner).')] });
   const t = (await resolveMember(m, a[0])) || (await resolveMemberById(m.guild, a[0]));
   if (!t) return m.reply({ embeds: [errE('Not found.')] });
   if (!t.bannable) return m.reply({ embeds: [errE('Hierarchy.')] });
@@ -574,14 +819,13 @@ commands.ban = { cat: 'Moderation', desc: 'Ban', usage: 'ban <@user|userID> [rea
   const e = okE('🔨 Banned').addFields(
     { name: 'User', value: `${t.user.tag} (${t.id})`, inline: true },
     { name: 'By', value: `${m.author.tag} (${tier.label})`, inline: true },
-    { name: 'Reason', value: r }
-  );
+    { name: 'Reason', value: r });
   m.reply({ embeds: [e] });
   sendLog(m.guild, BAN_LOG_CHANNEL_ID, e);
 }};
 commands.unban = { cat: 'Moderation', desc: 'Unban', usage: 'unban <id>', async run(m, a) {
   const tier = getStaffTier(m.member);
-  if (!tier || !tier.canBan) return m.reply({ embeds: [errE('❌ No permission (Owner).')] });
+  if (!tier || !tier.canBan) return m.reply({ embeds: [errE('❌ No permission.')] });
   if (!a[0]) return m.reply({ embeds: [errE('Provide ID.')] });
   try { await m.guild.bans.remove(a[0]); m.reply({ embeds: [okE('🔓 Unbanned', `\`${a[0]}\``)] }); } catch (e) { m.reply({ embeds: [errE('Failed', e.message)] }); }
 }};
@@ -594,148 +838,103 @@ commands.kick = { cat: 'Moderation', desc: 'Kick', usage: 'kick <@user|userID> [
   const r = a.slice(1).join(' ') || 'No reason';
   await t.kick(`${m.author.tag} [${tier.label}]: ${r}`).catch(e => m.reply({ embeds: [errE('Failed', e.message)] }));
   const e = okE('👢 Kicked').addFields(
-    { name: 'User', value: `${t.user.tag}`, inline: true },
+    { name: 'User', value: t.user.tag, inline: true },
     { name: 'By', value: `${m.author.tag} (${tier.label})`, inline: true },
-    { name: 'Reason', value: r }
-  );
+    { name: 'Reason', value: r });
   m.reply({ embeds: [e] });
   sendLog(m.guild, KICK_LOG_CHANNEL_ID || GENERAL_LOG_CHANNEL_ID, e);
 }};
 
-/* ============================================================
- *  !mute — VOICE MUTE with tier limits
- * ============================================================ */
-commands.mute = { cat: 'Moderation', desc: 'Voice-mute a member', usage: 'mute <@user|userID> <minutes|perm> <reason>', async run(m, a) {
+commands.mute = { cat: 'Moderation', desc: 'Voice-mute', usage: 'mute <@user|userID> <minutes|perm> <reason>', async run(m, a) {
   const tier = getStaffTier(m.member);
-  if (!tier) return m.reply({ embeds: [errE('❌ ما عندكش صلاحية.')] });
-
-  let target = m.mentions.members.first() || await resolveMemberById(m.guild, a[0]);
-  if (!target) return m.reply({ embeds: [errE('❌ ما لقيتش العضو.', 'Usage: `!mute <@user|userID> <minutes|perm> <reason>`')] });
+  if (!tier) return m.reply({ embeds: [errE('❌ No permission.')] });
+  const target = m.mentions.members.first() || await resolveMemberById(m.guild, a[0]);
+  if (!target) return m.reply({ embeds: [errE('❌ Not found.', 'Usage: `!mute <@user|userID> <minutes|perm> <reason>`')] });
 
   const durArg = (a[1] || '').trim().toLowerCase();
   const reason = a.slice(2).join(' ').trim();
-  if (!durArg) return m.reply({ embeds: [errE('❌ خاصك تحدد المدة.')] });
-  if (!reason) return m.reply({ embeds: [errE('❌ خاصك تكتب السبب.')] });
+  if (!durArg) return m.reply({ embeds: [errE('❌ Specific duration.')] });
+  if (!reason) return m.reply({ embeds: [errE('❌ Provide reason.')] });
 
-  let minutes = 0;
-  let permanent = false;
-
+  let minutes = 0, permanent = false;
   if (durArg === 'perm' || durArg === 'permanent') {
-    if (tier.maxMute !== -1) return m.reply({ embeds: [errE('❌ ما عندكش صلاحية الـ mute الدائم.', `الحد الأقصى للـ ${tier.label}: **${fmtMinutes(tier.maxMute)}**.`)] });
+    if (tier.maxMute !== -1) return m.reply({ embeds: [errE('❌ ما عندكش صلاحية الـ perm.', `Max: **${fmtMinutes(tier.maxMute)}**.`)] });
     permanent = true;
   } else {
     minutes = parseInt(durArg, 10);
-    if (isNaN(minutes)) return m.reply({ embeds: [errE('❌ المدة ماشي صحيحة.')] });
-    if (minutes < tier.minMute) return m.reply({ embeds: [errE('❌ المدة قليلة بزاف', `الحد الأدنى: **${tier.minMute}** دقائق.`)] });
+    if (isNaN(minutes)) return m.reply({ embeds: [errE('❌ Invalid minutes.')] });
+    if (minutes < tier.minMute) return m.reply({ embeds: [errE('❌ Too short.', `Min: **${tier.minMute}m**.`)] });
     if (tier.maxMute !== -1 && minutes > tier.maxMute) {
-      if (tier.rank === 1) return m.reply({ embeds: [errE('❌ mymknch aw9 rak 4a helper', `الحد الأقصى للـ Helper: **10 دقائق**.`)] });
-      return m.reply({ embeds: [errE(`❌ الحد الأقصى للـ ${tier.label}: **${fmtMinutes(tier.maxMute)}**.`)] });
+      if (tier.rank === 1) return m.reply({ embeds: [errE('❌ mymknch aw9 rak 4a helper', 'Max Helper: **10 min**.')] });
+      return m.reply({ embeds: [errE(`❌ Max for ${tier.label}: **${fmtMinutes(tier.maxMute)}**.`)] });
     }
   }
-
-  if (!target.voice?.channel) return m.reply({ embeds: [errE('❌ العضو ماشي فـ voice channel.')] });
-
+  if (!target.voice?.channel) return m.reply({ embeds: [errE('❌ Not in voice.')] });
   const me = m.guild.members.me;
-  if (target.roles.highest.position >= me.roles.highest.position)
-    return m.reply({ embeds: [errE('❌ Role hierarchy.')] });
+  if (target.roles.highest.position >= me.roles.highest.position) return m.reply({ embeds: [errE('❌ Hierarchy.')] });
 
   try {
     await target.voice.setMute(true, `${m.author.tag} [${tier.label}]: ${reason}`);
     const key = `${m.guild.id}:${target.id}`;
-    activeMutes[key] = {
-      guildId: m.guild.id, userId: target.id,
-      unmuteAt: permanent ? -1 : Date.now() + minutes * 60 * 1000,
-      permanent, reason,
-      modTag: m.author.tag, modTier: tier.label,
-      channelId: target.voice.channel.id
-    };
+    activeMutes[key] = { guildId: m.guild.id, userId: target.id, unmuteAt: permanent ? -1 : Date.now() + minutes * 60 * 1000, permanent, reason, modTag: m.author.tag, modTier: tier.label, channelId: target.voice.channel.id };
     saveMuteConfig(activeMutes);
     scheduleUnmute(key);
-
     const e = okE('🔇 Voice Muted').addFields(
       { name: 'User', value: `${target.user.tag} (${target.id})`, inline: true },
       { name: 'Duration', value: permanent ? 'Permanent' : `${minutes} min`, inline: true },
       { name: 'By', value: `${m.author.tag} (${tier.label})`, inline: true },
-      { name: 'Channel', value: `<#${target.voice.channel.id}>`, inline: true },
-      { name: 'Reason', value: reason }
-    );
+      { name: 'Reason', value: reason });
     m.reply({ embeds: [e] });
     sendLog(m.guild, MUTE_LOG_CHANNEL_ID, e);
-  } catch (err) {
-    console.error('[MUTE]', err);
-    m.reply({ embeds: [errE('❌ فشل الـ mute', err.message)] });
-  }
+  } catch (err) { m.reply({ embeds: [errE('❌ Failed', err.message)] }); }
 }};
-
-commands.unmute = { cat: 'Moderation', desc: 'Unmute (voice)', usage: 'unmute <@user|userID>', async run(m, a) {
+commands.unmute = { cat: 'Moderation', desc: 'Unmute', usage: 'unmute <@user|userID>', async run(m, a) {
   const tier = getStaffTier(m.member);
-  if (!tier) return m.reply({ embeds: [errE('❌ ما عندكش صلاحية.')] });
+  if (!tier) return m.reply({ embeds: [errE('❌ No permission.')] });
   const t = m.mentions.members.first() || await resolveMemberById(m.guild, a[0]);
   if (!t) return m.reply({ embeds: [errE('Not found.')] });
-  if (!t.voice?.channel) return m.reply({ embeds: [errE('❌ العضو ماشي فـ voice channel.')] });
-  if (!t.voice.serverMute) return m.reply({ embeds: [errE('❌ العضو ماشي muted.')] });
-
+  if (!t.voice?.channel) return m.reply({ embeds: [errE('❌ Not in voice.')] });
+  if (!t.voice.serverMute) return m.reply({ embeds: [errE('❌ Not muted.')] });
   try {
     await t.voice.setMute(false, `Unmuted by ${m.author.tag}`);
     const key = `${m.guild.id}:${t.id}`;
-    if (activeMutes[key]) {
-      delete activeMutes[key];
-      saveMuteConfig(activeMutes);
-      if (muteTimers.has(key)) { clearTimeout(muteTimers.get(key)); muteTimers.delete(key); }
-    }
-    const e = okE('🔊 Unmuted').addFields(
-      { name: 'User', value: `${t.user.tag}`, inline: true },
-      { name: 'By', value: `${m.author.tag} (${tier.label})`, inline: true }
-    );
+    if (activeMutes[key]) { delete activeMutes[key]; saveMuteConfig(activeMutes); if (muteTimers.has(key)) { clearTimeout(muteTimers.get(key)); muteTimers.delete(key); } }
+    const e = okE('🔊 Unmuted').addFields({ name: 'User', value: t.user.tag, inline: true }, { name: 'By', value: `${m.author.tag} (${tier.label})`, inline: true });
     m.reply({ embeds: [e] });
     sendLog(m.guild, MUTE_LOG_CHANNEL_ID, e);
   } catch (err) { m.reply({ embeds: [errE('❌ Failed', err.message)] }); }
 }};
 
-/* ============================================================
- *  !timeout — Discord native timeout (Head Admin+)
- * ============================================================ */
-commands.timeout = { cat: 'Moderation', desc: 'Timeout a member', usage: 'timeout <@user|userID> <minutes> <reason>', async run(m, a) {
+commands.timeout = { cat: 'Moderation', desc: 'Timeout', usage: 'timeout <@user|userID> <minutes> <reason>', async run(m, a) {
   const tier = getStaffTier(m.member);
-  if (!tier) return m.reply({ embeds: [errE('❌ ما عندكش صلاحية.')] });
-  if (!tier.canTimeout) return m.reply({ embeds: [errE('❌ ما عندكش صلاحية الـ timeout.', 'خاصك تكون Head Admin ولا فوق.')] });
-
+  if (!tier || !tier.canTimeout) return m.reply({ embeds: [errE('❌ No permission (Head Admin+).')] });
   const target = m.mentions.members.first() || await resolveMemberById(m.guild, a[0]);
-  if (!target) return m.reply({ embeds: [errE('❌ ما لقيتش العضو.', 'Usage: `!timeout <@user|userID> <minutes> <reason>`')] });
-
+  if (!target) return m.reply({ embeds: [errE('❌ Not found.')] });
   const minutes = parseInt(a[1], 10);
   const reason = a.slice(2).join(' ').trim();
-  if (isNaN(minutes) || minutes < 1) return m.reply({ embeds: [errE('❌ المدة ماشي صحيحة.')] });
-  if (!reason) return m.reply({ embeds: [errE('❌ خاصك تكتب السبب.')] });
-  if (!target.moderatable) return m.reply({ embeds: [errE('❌ Role hierarchy.')] });
-
+  if (isNaN(minutes) || minutes < 1) return m.reply({ embeds: [errE('❌ Invalid minutes.')] });
+  if (!reason) return m.reply({ embeds: [errE('❌ Provide reason.')] });
+  if (!target.moderatable) return m.reply({ embeds: [errE('❌ Hierarchy.')] });
   try {
     await target.timeout(minutes * 60 * 1000, `${m.author.tag} [${tier.label}]: ${reason}`);
-    const e = okE('⏳ Member Timed Out').addFields(
-      { name: 'User', value: `${target.user.tag} (${target.id})`, inline: true },
+    const e = okE('⏳ Timed Out').addFields(
+      { name: 'User', value: `${target.user.tag}`, inline: true },
       { name: 'Duration', value: `${minutes} min`, inline: true },
       { name: 'By', value: `${m.author.tag} (${tier.label})`, inline: true },
-      { name: 'Reason', value: reason }
-    );
+      { name: 'Reason', value: reason });
     m.reply({ embeds: [e] });
     sendLog(m.guild, TIMEOUT_LOG_CHANNEL_ID, e);
   } catch (err) { m.reply({ embeds: [errE('❌ Failed', err.message)] }); }
 }};
 commands.untimeout = { cat: 'Moderation', desc: 'Remove timeout', usage: 'untimeout <@user|userID>', async run(m, a) {
   const tier = getStaffTier(m.member);
-  if (!tier) return m.reply({ embeds: [errE('❌ ما عندكش صلاحية.')] });
-  if (!tier.canTimeout) return m.reply({ embeds: [errE('❌ No permission (Head Admin+).')] });
-
+  if (!tier || !tier.canTimeout) return m.reply({ embeds: [errE('❌ No permission.')] });
   const target = m.mentions.members.first() || await resolveMemberById(m.guild, a[0]);
   if (!target) return m.reply({ embeds: [errE('Not found.')] });
-  if (!target.isCommunicationDisabled()) return m.reply({ embeds: [errE('❌ العضو ماشي فـ timeout.')] });
-
+  if (!target.isCommunicationDisabled()) return m.reply({ embeds: [errE('❌ Not timed out.')] });
   try {
     await target.timeout(null, `Untimeout by ${m.author.tag}`);
-    const e = okE('✅ Timeout Removed').addFields(
-      { name: 'User', value: `${target.user.tag}`, inline: true },
-      { name: 'By', value: `${m.author.tag} (${tier.label})`, inline: true }
-    );
+    const e = okE('✅ Timeout Removed').addFields({ name: 'User', value: target.user.tag, inline: true }, { name: 'By', value: `${m.author.tag} (${tier.label})`, inline: true });
     m.reply({ embeds: [e] });
     sendLog(m.guild, TIMEOUT_LOG_CHANNEL_ID, e);
   } catch (err) { m.reply({ embeds: [errE('❌ Failed', err.message)] }); }
@@ -780,14 +979,14 @@ commands.slowmode = { cat: 'Moderation', desc: 'Slowmode', usage: 'slowmode <sec
 }};
 commands.lock = { cat: 'Moderation', desc: 'Lock', async run(m, a) {
   const tier = getStaffTier(m.member);
-  if (!tier || tier.rank < 2) return m.reply({ embeds: [errE('❌ No permission (Moderator+).')] });
+  if (!tier || tier.rank < 2) return m.reply({ embeds: [errE('❌ No permission.')] });
   const ch = m.mentions.channels.first() || m.channel;
   await ch.permissionOverwrites.edit(m.guild.roles.everyone, { SendMessages: false }).catch(()=>{});
   m.reply({ embeds: [okE('🔒', `${ch}`)] });
 }};
 commands.unlock = { cat: 'Moderation', desc: 'Unlock', async run(m, a) {
   const tier = getStaffTier(m.member);
-  if (!tier || tier.rank < 2) return m.reply({ embeds: [errE('❌ No permission (Moderator+).')] });
+  if (!tier || tier.rank < 2) return m.reply({ embeds: [errE('❌ No permission.')] });
   const ch = m.mentions.channels.first() || m.channel;
   await ch.permissionOverwrites.edit(m.guild.roles.everyone, { SendMessages: null }).catch(()=>{});
   m.reply({ embeds: [okE('🔓', `${ch}`)] });
@@ -798,106 +997,83 @@ commands.hackban = { cat: 'Moderation', desc: 'Hackban', usage: 'hackban <id> [r
   if (!a[0]) return m.reply({ embeds: [errE('Provide ID.')] });
   const r = a.slice(1).join(' ') || 'Hackban';
   try {
-    await m.guild.bans.create(a[0], { reason: `${m.author.tag} [${tier.label}]: ${r}` });
-    const e = okE('🔨 Hackbanned').addFields(
-      { name: 'User ID', value: `\`${a[0]}\``, inline: true },
-      { name: 'By', value: `${m.author.tag} (${tier.label})`, inline: true },
-      { name: 'Reason', value: r }
-    );
+    await m.guild.bans.create(a[0], { reason: `${m.author.tag}: ${r}` });
+    const e = okE('🔨 Hackbanned').addFields({ name: 'ID', value: `\`${a[0]}\``, inline: true }, { name: 'By', value: m.author.tag, inline: true }, { name: 'Reason', value: r });
     m.reply({ embeds: [e] });
     sendLog(m.guild, BAN_LOG_CHANNEL_ID, e);
   } catch (e) { m.reply({ embeds: [errE('Failed', e.message)] }); }
 }};
 
-/* ============================================================
- *  !move — Moderator (rank 2+)
- * ============================================================ */
-commands.move = { cat: 'Moderation', desc: 'Move a member to another voice channel', usage: 'move <@user|userID> <#voice|voiceID>', async run(m, a) {
+commands.move = { cat: 'Moderation', desc: 'Move member', usage: 'move <@user|userID> <#voice|voiceID>', async run(m, a) {
   const tier = getStaffTier(m.member);
-  if (!tier) return m.reply({ embeds: [errE('❌ ما عندكش صلاحية.')] });
-  if (!tier.canMove) return m.reply({ embeds: [errE('❌ mymknkch aw9 rak 4a helper', 'الـ Helper ما عندوش صلاحية الـ move.')] });
+  if (!tier) return m.reply({ embeds: [errE('❌ No permission.')] });
+  if (!tier.canMove) return m.reply({ embeds: [errE('❌ mymknkch aw9 rak 4a helper')] });
   if (!a[0] || !a[1]) return m.reply({ embeds: [errE('Usage: `!move <@user|userID> <#voice|voiceID>`')] });
 
   const target = m.mentions.members.first() || await resolveMemberById(m.guild, a[0]);
-  if (!target) return m.reply({ embeds: [errE('❌ ما لقيتش العضو.')] });
+  if (!target) return m.reply({ embeds: [errE('❌ Member not found.')] });
 
   let destCh = m.mentions.channels.first();
   if (!destCh) {
     const chStr = a[1].trim().replace(/[<#>]/g, '');
     if (/^\d{17,20}$/.test(chStr)) destCh = m.guild.channels.cache.get(chStr) || await m.guild.channels.fetch(chStr).catch(()=>null);
   }
-  if (!destCh) return m.reply({ embeds: [errE('❌ ما لقيتش الـ voice channel.')] });
-  if (destCh.type !== ChannelType.GuildVoice && destCh.type !== ChannelType.GuildStageVoice)
-    return m.reply({ embeds: [errE('❌ الهدف ماشي voice channel.')] });
+  if (!destCh) return m.reply({ embeds: [errE('❌ Channel not found.')] });
+  if (destCh.type !== ChannelType.GuildVoice && destCh.type !== ChannelType.GuildStageVoice) return m.reply({ embeds: [errE('❌ Not voice.')] });
 
   const fromCh = target.voice?.channel;
-  if (!fromCh) return m.reply({ embeds: [errE('❌ العضو ماشي فـ voice channel.')] });
-  if (fromCh.id === destCh.id) return m.reply({ embeds: [errE('❌ العضو ديجا فـ هاد الروم.')] });
+  if (!fromCh) return m.reply({ embeds: [errE('❌ Member not in voice.')] });
+  if (fromCh.id === destCh.id) return m.reply({ embeds: [errE('❌ Already in that channel.')] });
 
   const me = m.guild.members.me;
-  if (target.roles.highest.position >= me.roles.highest.position) return m.reply({ embeds: [errE('❌ Role hierarchy.')] });
+  if (target.roles.highest.position >= me.roles.highest.position) return m.reply({ embeds: [errE('❌ Hierarchy.')] });
 
   try {
     await target.voice.setChannel(destCh, `Moved by ${m.author.tag} (${tier.label})`);
-    const e = okE('➡️ Member Moved').addFields(
-      { name: 'User', value: `${target.user.tag} (${target.id})`, inline: true },
+    const e = okE('➡️ Moved').addFields(
+      { name: 'User', value: `${target.user.tag}`, inline: true },
       { name: 'By', value: `${m.author.tag} (${tier.label})`, inline: true },
       { name: 'From', value: `${fromCh}`, inline: true },
-      { name: 'To', value: `${destCh}`, inline: true }
-    );
+      { name: 'To', value: `${destCh}`, inline: true });
     m.reply({ embeds: [e] });
     sendLog(m.guild, MOVE_LOG_CHANNEL_ID, e);
   } catch (err) { m.reply({ embeds: [errE('❌ Failed', err.message)] }); }
 }};
 
-/* ============================================================
- *  !nickname — Co-Owner (rank 7+)
- * ============================================================ */
-commands.nickname = { cat: 'Members', desc: 'Change a member nickname', usage: 'nickname <@user|userID> <new nickname>', async run(m, a) {
+commands.nickname = { cat: 'Members', desc: 'Change nickname', usage: 'nickname <@user|userID> <new nickname>', async run(m, a) {
   const tier = getStaffTier(m.member);
-  if (!tier) return m.reply({ embeds: [errE('❌ ما عندكش صلاحية.')] });
-  if (!tier.canNickname) return m.reply({ embeds: [errE('❌ ما عندكش صلاحية تبديل النيك نيم.', 'خاصك تكون Co-Owner ولا فوق.')] });
+  if (!tier || !tier.canNickname) return m.reply({ embeds: [errE('❌ No permission (Co-Owner+).')] });
   if (!a[0] || a.length < 2) return m.reply({ embeds: [errE('Usage: `!nickname <@user|userID> <new nickname>`')] });
-
   const target = m.mentions.members.first() || await resolveMemberById(m.guild, a[0]);
-  if (!target) return m.reply({ embeds: [errE('❌ ما لقيتش العضو.')] });
-
+  if (!target) return m.reply({ embeds: [errE('❌ Not found.')] });
   const nickname = a.slice(1).join(' ').trim().slice(0, 32);
-  if (!nickname) return m.reply({ embeds: [errE('❌ خاصك تحدد النيك نيم الجديد.')] });
-
+  if (!nickname) return m.reply({ embeds: [errE('❌ Provide nickname.')] });
   const me = m.guild.members.me;
-  if (target.roles.highest.position >= me.roles.highest.position) return m.reply({ embeds: [errE('❌ Role hierarchy.')] });
-
+  if (target.roles.highest.position >= me.roles.highest.position) return m.reply({ embeds: [errE('❌ Hierarchy.')] });
   const oldNick = target.nickname || target.user.username;
   try {
-    await target.setNickname(nickname, `Changed by ${m.author.tag} (${tier.label})`);
+    await target.setNickname(nickname, `Changed by ${m.author.tag}`);
     const e = okE('✏️ Nickname Changed').addFields(
-      { name: 'User', value: `${target.user.tag} (${target.id})`, inline: true },
+      { name: 'User', value: `${target.user.tag}`, inline: true },
       { name: 'By', value: `${m.author.tag} (${tier.label})`, inline: true },
       { name: 'Before', value: oldNick, inline: true },
-      { name: 'After', value: nickname, inline: true }
-    );
+      { name: 'After', value: nickname, inline: true });
     m.reply({ embeds: [e] });
     sendLog(m.guild, NICKNAME_LOG_CHANNEL_ID, e);
   } catch (err) { m.reply({ embeds: [errE('❌ Failed', err.message)] }); }
 }};
-commands.resetnick = { cat: 'Members', desc: 'Reset a member nickname', usage: 'resetnick <@user|userID>', async run(m, a) {
+commands.resetnick = { cat: 'Members', desc: 'Reset nickname', usage: 'resetnick <@user|userID>', async run(m, a) {
   const tier = getStaffTier(m.member);
-  if (!tier) return m.reply({ embeds: [errE('❌ ما عندكش صلاحية.')] });
-  if (!tier.canNickname) return m.reply({ embeds: [errE('❌ No permission (Co-Owner+).')] });
-
+  if (!tier || !tier.canNickname) return m.reply({ embeds: [errE('❌ No permission.')] });
   const target = m.mentions.members.first() || await resolveMemberById(m.guild, a[0]);
-  if (!target) return m.reply({ embeds: [errE('❌ ما لقيتش العضو.')] });
-
+  if (!target) return m.reply({ embeds: [errE('❌ Not found.')] });
   const oldNick = target.nickname || target.user.username;
   try {
-    await target.setNickname(null, `Reset by ${m.author.tag} (${tier.label})`);
-    const e = okE('↩️ Nickname Reset').addFields(
-      { name: 'User', value: `${target.user.tag} (${target.id})`, inline: true },
-      { name: 'By', value: `${m.author.tag} (${tier.label})`, inline: true },
+    await target.setNickname(null, `Reset by ${m.author.tag}`);
+    const e = okE('↩️ Reset').addFields(
+      { name: 'User', value: `${target.user.tag}`, inline: true },
       { name: 'Before', value: oldNick, inline: true },
-      { name: 'After', value: target.user.username, inline: true }
-    );
+      { name: 'After', value: target.user.username, inline: true });
     m.reply({ embeds: [e] });
     sendLog(m.guild, NICKNAME_LOG_CHANNEL_ID, e);
   } catch (err) { m.reply({ embeds: [errE('❌ Failed', err.message)] }); }
@@ -925,7 +1101,7 @@ commands.avatar = { cat: 'Members', desc: 'Avatar', usage: 'avatar [@user|userID
   m.reply({ embeds: [infoE(`🖼️ ${u.tag}`).setImage(u.displayAvatarURL({ size: 1024 }))] });
 }};
 commands.membercount = { cat: 'Members', desc: 'Count', async run(m) { m.reply({ embeds: [infoE('👥', `${m.guild.memberCount}`)] }); }};
-commands.roles = { cat: 'Members', desc: 'List all roles', async run(m) {
+commands.roles = { cat: 'Members', desc: 'List roles', async run(m) {
   m.reply({ embeds: [infoE('🏷️ Roles').setDescription(m.guild.roles.cache.sort((a,b)=>b.position-a.position).map(r => r.toString()).join(' ').slice(0, 4000))] });
 }};
 commands.afk = { cat: 'Members', desc: 'AFK', usage: 'afk [reason]', async run(m, a) {
@@ -975,7 +1151,7 @@ commands.say = { cat: 'Utility', desc: 'Say', usage: 'say <text>', async run(m, 
 }};
 commands.announce = { cat: 'Utility', desc: 'Announce', usage: 'announce <text>', async run(m, a) {
   const tier = getStaffTier(m.member);
-  if (!tier || tier.rank < 3) return m.reply({ embeds: [errE('❌ No permission (Admin+).')] });
+  if (!tier || tier.rank < 3) return m.reply({ embeds: [errE('❌ No permission.')] });
   const t = a.join(' '); if (!t) return;
   m.channel.send({ embeds: [infoE('📢', t)] });
 }};
@@ -1044,7 +1220,7 @@ client.once('ready', async () => {
   console.log('==============================');
   console.log(`[READY] Logged in as ${client.user.tag}`);
   console.log(`[READY] Guilds: ${client.guilds.cache.size}`);
-  console.log(`[READY] Staff roles loaded: ${STAFF_ROLES.length}`);
+  console.log(`[READY] Staff roles: ${STAFF_ROLES.length}`);
   console.log(`[READY] Mute Log: ${MUTE_LOG_CHANNEL_ID}`);
   console.log(`[READY] Move Log: ${MOVE_LOG_CHANNEL_ID}`);
   console.log(`[READY] Ban Log: ${BAN_LOG_CHANNEL_ID}`);
@@ -1062,10 +1238,11 @@ client.once('ready', async () => {
   client.user.setActivity('𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷', { type: ActivityType.Watching });
   await restoreAllVoiceConnections();
   await restoreMutes();
+  await restoreGiveaways();
 });
 
 /* ============================================================
- *             EVENT: WELCOME + AUTO ROLE
+ *             EVENT: WELCOME
  * ============================================================ */
 client.on('guildMemberAdd', async member => {
   console.log(`[WELCOME] ➕ ${member.user.tag} (${member.id})`);
@@ -1094,11 +1271,11 @@ client.on(Events.InteractionCreate, async interaction => {
       const guild = interaction.guild;
       const member = await guild.members.fetch(interaction.user.id);
       if (member.roles.cache.has(VERIFIED_ROLE_ID))
-        return interaction.reply({ embeds: [infoE('ℹ️ Already Verified', 'راك ديجا verified!')], ephemeral: true });
+        return interaction.reply({ embeds: [infoE('ℹ️ Already Verified')], ephemeral: true });
       await member.roles.add(VERIFIED_ROLE_ID, 'Verified via button');
       if (UNVERIFIED_ROLE_ID && member.roles.cache.has(UNVERIFIED_ROLE_ID))
         await member.roles.remove(UNVERIFIED_ROLE_ID, 'Verified').catch(()=>{});
-      await interaction.reply({ embeds: [okE('✅ Verified!', `مرحبا بيك فـ **𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷**! دابا عندك access.`)], ephemeral: true });
+      await interaction.reply({ embeds: [okE('✅ Verified!', `مرحبا بيك!`)], ephemeral: true });
     } catch (e) {
       console.error('[VERIFY]', e);
       if (!interaction.replied && !interaction.deferred)
@@ -1114,30 +1291,24 @@ client.on(Events.InteractionCreate, async interaction => {
     const questions = isMc ? APPLY_QUESTIONS_MC : APPLY_QUESTIONS_DISCORD;
 
     if (dmApplications.has(userId))
-      return interaction.reply({ embeds: [errE('❌ Already Applying', 'عندك application مفتوحة.')], ephemeral: true });
+      return interaction.reply({ embeds: [errE('❌ Already Applying')], ephemeral: true });
 
     try {
       const dm = await interaction.user.createDM();
       dmApplications.set(userId, { type, step: 0, answers: {}, questions, guildId: interaction.guild.id, startedAt: Date.now() });
-      await interaction.reply({ embeds: [okE('📩 DM Sent', 'تحقق من الـ DMs!')], ephemeral: true });
-
-      const first = questions[0];
+      await interaction.reply({ embeds: [okE('📩 DM Sent')], ephemeral: true });
       await dm.send({ embeds: [
         new EmbedBuilder()
           .setColor(C.info)
           .setTitle(`📝 Application — ${type}`)
-          .setDescription(
-            `مرحبا <@${userId}>! غادي نسولك **${questions.length}** أسئلة.\n` +
-            `اكتب \`cancel\` باش تلغي.\n\n` +
-            `**Q1/${questions.length}:** ${first.q}`
-          )
+          .setDescription(`مرحبا <@${userId}>! غادي نسولك **${questions.length}** أسئلة.\nاكتب \`cancel\` باش تلغي.\n\n**Q1/${questions.length}:** ${questions[0].q}`)
           .setFooter({ text: '𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 • Applications' })
           .setTimestamp()
       ] });
     } catch (e) {
       console.error('[APPLY] DM failed:', e.message);
       dmApplications.delete(userId);
-      return interaction.reply({ embeds: [errE('❌ Cannot DM you', 'افتح الـ DMs من إعدادات السيرفر.')], ephemeral: true });
+      return interaction.reply({ embeds: [errE('❌ Cannot DM you')], ephemeral: true });
     }
     return;
   }
@@ -1149,12 +1320,7 @@ client.on(Events.InteractionCreate, async interaction => {
     try {
       const user = await client.users.fetch(userId).catch(()=>null);
       if (user) await user.send({ embeds: [okE('🎉 Congratulations!', `**تم قبولك فـ Staff 𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷!**`)] }).catch(()=>{});
-      const data = applications.get(interaction.message.id);
-      const e = okE('✅ Application Accepted').addFields(
-        { name: 'Applicant', value: `<@${userId}>`, inline: true },
-        { name: 'Type', value: data?.type || 'Unknown', inline: true },
-        { name: 'Reviewed by', value: `${interaction.user.tag}`, inline: true });
-      await interaction.reply({ embeds: [e] });
+      await interaction.reply({ embeds: [okE('✅ Accepted', `<@${userId}>`)] });
       try { await interaction.message.edit({ components: [] }); } catch {}
     } catch (e) { console.error('[ACCEPT]', e); }
     return;
@@ -1166,15 +1332,48 @@ client.on(Events.InteractionCreate, async interaction => {
     const userId = id.replace('apply_reject_', '');
     try {
       const user = await client.users.fetch(userId).catch(()=>null);
-      if (user) await user.send({ embeds: [errE('❌ Application Result', `**للأسف، تم رفض طلبك.**`)] }).catch(()=>{});
-      const e = errE('❌ Application Rejected').addFields(
-        { name: 'Applicant', value: `<@${userId}>`, inline: true },
-        { name: 'Reviewed by', value: `${interaction.user.tag}`, inline: true });
-      await interaction.reply({ embeds: [e] });
+      if (user) await user.send({ embeds: [errE('❌ Application Result', `**تم رفض طلبك.**`)] }).catch(()=>{});
+      await interaction.reply({ embeds: [errE('❌ Rejected', `<@${userId}>`)] });
       try { await interaction.message.edit({ components: [] }); } catch {}
     } catch (e) { console.error('[REJECT]', e); }
     return;
   }
+});
+
+/* ============================================================
+ *             EVENT: MESSAGE REACTION (Giveaway entries)
+ * ============================================================ */
+client.on('messageReactionAdd', async (reaction, user) => {
+  try {
+    if (user.bot) return;
+    if (reaction.partial) await reaction.fetch().catch(()=>null);
+    if (reaction.emoji.name !== '🎉') return;
+
+    const gw = activeGiveaways[reaction.message.id];
+    if (!gw || gw.ended) return;
+    if (!gw.entries.includes(user.id)) {
+      gw.entries.push(user.id);
+      saveGiveawayConfig(activeGiveaways);
+      // Update entries count in embed
+      const guild = client.guilds.cache.get(gw.guildId);
+      const channel = guild?.channels.cache.get(gw.channelId);
+      const msg = await channel?.messages.fetch(reaction.message.id).catch(()=>null);
+      if (msg) msg.edit({ embeds: [buildGiveawayEmbed(gw, false)] }).catch(()=>{});
+    }
+  } catch (e) { console.error('[GIVEAWAY] reaction add:', e.message); }
+});
+
+client.on('messageReactionRemove', async (reaction, user) => {
+  try {
+    if (user.bot) return;
+    if (reaction.partial) await reaction.fetch().catch(()=>null);
+    if (reaction.emoji.name !== '🎉') return;
+
+    const gw = activeGiveaways[reaction.message.id];
+    if (!gw || gw.ended) return;
+    gw.entries = gw.entries.filter(id => id !== user.id);
+    saveGiveawayConfig(activeGiveaways);
+  } catch (e) { console.error('[GIVEAWAY] reaction remove:', e.message); }
 });
 
 /* ============================================================
@@ -1224,17 +1423,6 @@ client.on('guildMemberUpdate', async (o, n) => {
     sendLog(n.guild, ROLE_LOG_CHANNEL_ID, e);
   }
 });
-client.on('messageDelete', msg => {
-  if (!msg.guild || msg.author?.bot) return;
-  if (!msg.content && !msg.attachments.size) return;
-  sendLog(msg.guild, GENERAL_LOG_CHANNEL_ID,
-    errE('🗑️ Deleted').addFields({ name: 'Author', value: msg.author?.tag || '?', inline: true }, { name: 'Channel', value: `${msg.channel}`, inline: true }, { name: 'Content', value: (msg.content || '*[file]*').slice(0, 1000) }));
-});
-client.on('messageUpdate', (o, n) => {
-  if (!n.guild || n.author?.bot || o.content === n.content) return;
-  sendLog(n.guild, GENERAL_LOG_CHANNEL_ID,
-    infoE('✏️ Edited').addFields({ name: 'Author', value: n.author.tag, inline: true }, { name: 'Before', value: (o.content || '').slice(0, 800) }, { name: 'After', value: (n.content || '').slice(0, 800) }));
-});
 client.on('guildMemberRemove', async member => {
   const exec = await auditExec(member.guild, AuditLogEvent.MemberKick, member.id);
   const e = errE('👋 Left').addFields({ name: 'User', value: `${member.user.tag}` });
@@ -1263,35 +1451,28 @@ client.on('messageCreate', async message => {
 
     if (content.toLowerCase() === 'cancel') {
       dmApplications.delete(userId);
-      return message.reply({ embeds: [infoE('❌ Cancelled', 'تلغى الـ application ديالك.')] }).catch(()=>{});
+      return message.reply({ embeds: [infoE('❌ Cancelled')] }).catch(()=>{});
     }
 
-    const currentQ = app.questions[app.step];
-    app.answers[currentQ.key] = content;
+    app.answers[app.questions[app.step].key] = content;
     app.step++;
 
     if (app.step >= app.questions.length) {
       dmApplications.delete(userId);
-      await message.reply({ embeds: [okE('✅ Application Sent!', 'شكراً!')] }).catch(()=>{});
+      await message.reply({ embeds: [okE('✅ Application Sent!')] }).catch(()=>{});
 
       const guild = client.guilds.cache.get(app.guildId);
-      const resultsCh = guild?.channels.cache.get(APPLY_RESULTS_CHANNEL_ID)
-                     || await guild?.channels.fetch(APPLY_RESULTS_CHANNEL_ID).catch(()=>null);
+      const resultsCh = guild?.channels.cache.get(APPLY_RESULTS_CHANNEL_ID);
       if (!resultsCh || !resultsCh.isTextBased()) return;
 
       const isMc = app.type === 'Minecraft Staff';
       const embed = new EmbedBuilder()
         .setColor(isMc ? C.ok : C.info)
         .setTitle(`📝 New Application — ${app.type}`)
-        .setDescription(
-          `**Applicant:** <@${userId}> (\`${userId}\`)\n` +
-          `**Username:** \`${message.author.tag}\`\n` +
-          `**Submitted:** <t:${Math.floor(Date.now()/1000)}:R>`
-        )
+        .setDescription(`**Applicant:** <@${userId}> (\`${userId}\`)\n**Username:** \`${message.author.tag}\``)
         .setThumbnail(message.author.displayAvatarURL({ size: 256 }))
-        .setFooter({ text: 'Use buttons below to Accept or Reject' })
+        .setFooter({ text: 'Accept or Reject below' })
         .setTimestamp();
-
       for (const q of app.questions)
         embed.addFields({ name: q.label, value: `\`\`\`${String(app.answers[q.key] || '(empty)').slice(0, 1000)}\`\`\`` });
 
@@ -1299,7 +1480,6 @@ client.on('messageCreate', async message => {
         new ButtonBuilder().setCustomId(`apply_accept_${userId}`).setLabel('Accept').setEmoji('✅').setStyle(ButtonStyle.Success),
         new ButtonBuilder().setCustomId(`apply_reject_${userId}`).setLabel('Reject').setEmoji('❌').setStyle(ButtonStyle.Danger)
       );
-
       const msg = await resultsCh.send({ embeds: [embed], components: [row] }).catch(()=>null);
       if (msg) applications.set(msg.id, { userId, type: app.type, answers: app.answers });
       return;
@@ -1351,14 +1531,11 @@ client.on('messageCreate', async message => {
   const args = message.content.slice(PREFIX.length).trim().split(/\s+/);
   const name = args.shift().toLowerCase();
 
-  // === Special handling: "roll all info" ===
-  if (name === 'roll' && args[0]?.toLowerCase() === 'all' && args[1]?.toLowerCase() === 'info') {
+  // Special: "roll all info" / "role all info"
+  if (name === 'roll' && args[0]?.toLowerCase() === 'all' && args[1]?.toLowerCase() === 'info')
     return commands.staffinfo.run(message, []);
-  }
-  // === "role all" also ===
-  if (name === 'role' && args[0]?.toLowerCase() === 'all' && args[1]?.toLowerCase() === 'info') {
+  if (name === 'role' && args[0]?.toLowerCase() === 'all' && args[1]?.toLowerCase() === 'info')
     return commands.staffinfo.run(message, []);
-  }
 
   const cmd = commands[name];
   if (!cmd) return;
