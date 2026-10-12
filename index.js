@@ -1798,4 +1798,126 @@ client.on('guildMemberUpdate', async (o, n) => {
 });
 
 client.on('guildMemberRemove', async member => {
-  const exec = await auditExec(member.guild, AuditLogEvent.MemberKick
+  const exec = await auditExec(member.guild, AuditLogEvent.MemberKick, member.id);
+  const e = errE('👋 Left').addFields({ name: 'User', value: member.user.tag });
+  if (exec) e.addFields({ name: 'Kicked by', value: exec.tag });
+  sendLog(member.guild, KICK_LOG_CHANNEL_ID || GENERAL_LOG_CHANNEL_ID, e);
+});
+
+client.on('guildBanAdd', async ban => {
+  const exec = await auditExec(ban.guild, AuditLogEvent.MemberBanAdd, ban.user.id);
+  const isManual = exec && exec.id !== client.user.id;
+  const e = errE(isManual ? '🔨 Member Banned (Manual)' : '🔨 Member Banned').addFields(
+    { name: 'User', value: `${ban.user.tag} (\`${ban.user.id}\`)`, inline: true },
+    { name: 'By', value: exec ? `${exec.tag} (\`${exec.id}\`)` : 'Unknown', inline: true },
+    { name: 'Reason', value: ban.reason || 'None', inline: false }
+  );
+  const channel = isManual ? MANUAL_BAN_LOG_CHANNEL_ID : BAN_LOG_CHANNEL_ID;
+  sendLog(ban.guild, channel, e);
+});
+
+/* ============================================================
+ *             EVENT: MESSAGE CREATE
+ * ============================================================ */
+client.on('messageCreate', async message => {
+  if (message.author.bot) return;
+
+  if (!message.guild) {
+    const userId = message.author.id;
+    if (!dmApplications.has(userId)) return;
+    const app = dmApplications.get(userId);
+    const content = message.content.trim();
+    if (content.toLowerCase() === 'cancel') {
+      dmApplications.delete(userId);
+      return message.reply({ embeds: [infoE('❌ Cancelled')] }).catch(()=>{});
+    }
+    app.answers[APPLY_QUESTIONS[app.step].key] = content;
+    app.step++;
+    if (app.step >= APPLY_QUESTIONS.length) {
+      dmApplications.delete(userId);
+      await message.reply({ embeds: [okE('✅ Application Sent!')] }).catch(()=>{});
+      const guild = client.guilds.cache.get(app.guildId);
+      const resultsCh = guild?.channels.cache.get(APPLY_RESULTS_CHANNEL_ID);
+      if (!resultsCh || typeof resultsCh.isTextBased !== 'function' || !resultsCh.isTextBased()) return;
+      const isMc = app.type === 'Minecraft Staff';
+      const embed = new EmbedBuilder().setColor(isMc ? C.ok : C.info)
+        .setTitle(`📝 New Application — ${app.type}`)
+        .setDescription(`**Applicant:** <@${userId}> (\`${userId}\`)\n**Username:** \`${message.author.tag}\``)
+        .setThumbnail(message.author.displayAvatarURL({ size: 256 }))
+        .setFooter({ text: 'Accept or Reject' }).setTimestamp();
+      for (const q of APPLY_QUESTIONS)
+        embed.addFields({ name: q.label, value: `\`\`\`${String(app.answers[q.key] || '(empty)').slice(0, 1000)}\`\`\`` });
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`apply_accept_${userId}`).setLabel('Accept').setEmoji('✅').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId(`apply_reject_${userId}`).setLabel('Reject').setEmoji('❌').setStyle(ButtonStyle.Danger)
+      );
+      const msg = await resultsCh.send({ embeds: [embed], components: [row] }).catch(()=>null);
+      if (msg) applications.set(msg.id, { userId, type: app.type, answers: app.answers });
+      return;
+    }
+    const nextQ = APPLY_QUESTIONS[app.step];
+    await message.reply({ embeds: [
+      new EmbedBuilder().setColor(C.info).setTitle(`Q${app.step + 1}/${APPLY_QUESTIONS.length}`)
+        .setDescription(nextQ.q).setFooter({ text: 'Type "cancel"' }).setTimestamp()
+    ] }).catch(()=>{});
+    return;
+  }
+
+  /* Anti-Link */
+  if (!isLinkWhitelisted(message.author.id)) {
+    const linkFound = containsAnyLink(message.content);
+    if (linkFound) {
+      await message.delete().catch(() => {});
+      const warning = new EmbedBuilder()
+        .setColor(0xff0000).setTitle('# ry7 t9wd lah yn3l tbon mok')
+        .setDescription(
+          `# ry7 t9wd lah yn3l tbon mok\n\n` +
+          `## ${message.author} — الروابط ممنوعة فالسيرفر! 🚫\n\n` +
+          `**Link detected:**\n\`\`\`${linkFound.slice(0, 100)}\`\`\``
+        )
+        .setThumbnail(message.author.displayAvatarURL({ size: 256 }))
+        .setFooter({ text: '𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 • Anti-Link' }).setTimestamp();
+      message.channel.send({ content: `<@${message.author.id}>`, embeds: [warning] })
+        .then(msg => setTimeout(() => msg.delete().catch(()=>{}), 15000)).catch(() => {});
+      return;
+    }
+  }
+
+  if (afks.has(message.author.id) && !message.content.startsWith(PREFIX + 'afk')) {
+    afks.delete(message.author.id);
+    message.reply({ embeds: [okE('👋 Welcome back')] }).then(x => setTimeout(() => x.delete().catch(()=>{}), 5000)).catch(()=>{});
+  }
+
+  const usr = eco(message.author.id); usr.msgs += 1;
+
+  if (!message.content.startsWith(PREFIX)) return;
+  const args = message.content.slice(PREFIX.length).trim().split(/\s+/);
+  const name = args.shift().toLowerCase();
+
+  /* ⭐ Special: !roll all info */
+  if (name === 'roll' && args[0]?.toLowerCase() === 'all' && args[1]?.toLowerCase() === 'info') {
+    return commands.staffinfo.run(message, []);
+  }
+  if (name === 'role' && args[0]?.toLowerCase() === 'all' && args[1]?.toLowerCase() === 'info') {
+    return commands.staffinfo.run(message, []);
+  }
+
+  const cmd = commands[name];
+  if (!cmd) return;
+  try { await cmd.run(message, args, client); }
+  catch (e) {
+    console.error(`[CMD ERR] ${name}:`, e);
+    message.reply({ embeds: [errE('❌ Error', (e.message || 'Unknown').slice(0, 500))] }).catch(()=>{});
+  }
+});
+
+/* ============================================================
+ *             GLOBAL ERROR HANDLING
+ * ============================================================ */
+process.on('unhandledRejection', e => console.error('[unhandledRejection]', e));
+process.on('uncaughtException', e => console.error('[uncaughtException]', e));
+
+/* ============================================================
+ *                     LOGIN
+ * ============================================================ */
+client.login(TOKEN);
