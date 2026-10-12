@@ -1,9 +1,10 @@
 /* ============================================================
- *  𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 Discord Bot — All IDs Hardcoded
- *  ✅ No Variables needed (except TOKEN below)
- *  ✅ Manual actions (without command) get logged
- *  ✅ Each action goes to its proper log channel
+ *  𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 Discord Bot — Full Version
+ *  Variables: DISCORD_TOKEN, PREFIX, GUILD_ID,
+ *             WELCOME_CHANNEL_ID, WELCOME_IMAGE
+ *  Everything else is hardcoded below.
  * ============================================================ */
+require('dotenv').config();
 
 const {
   Client, GatewayIntentBits, Partials, EmbedBuilder,
@@ -16,43 +17,46 @@ const fs = require('fs');
 const path = require('path');
 
 /* ============================================================
- *  🔑 TOKEN — بدل هاد القيمة بالتوكن ديالك
+ *  ENV VARIABLES
  * ============================================================ */
-const TOKEN = 'PUT_YOUR_BOT_TOKEN_HERE';
+const TOKEN              = process.env.DISCORD_TOKEN;
+const PREFIX             = process.env.PREFIX || '!';
+const GUILD_ID           = process.env.GUILD_ID || '';
+const WELCOME_CHANNEL_ID = process.env.WELCOME_CHANNEL_ID || '';
+const WELCOME_IMAGE      = process.env.WELCOME_IMAGE || '';
+
+if (!TOKEN) { console.error('[FATAL] DISCORD_TOKEN missing.'); process.exit(1); }
 
 /* ============================================================
- *  ⚙️ CONFIG — All IDs hardcoded
+ *  HARDCODED IDs — Everything else
  * ============================================================ */
-const PREFIX = '!';
 
-// Channels
-const WELCOME_CHANNEL_ID       = '1558168781677924383';
-const WELCOME_IMAGE            = '';
-const ROLE_LOG_CHANNEL_ID      = '1557761485961171085';
-const MUTE_LOG_CHANNEL_ID      = '1558158698805723226';
-const MOVE_LOG_CHANNEL_ID      = '1558625461821640808';
-const BAN_LOG_CHANNEL_ID       = '1558158791659229354';
-const TIMEOUT_LOG_CHANNEL_ID   = '1558158765453484182';
-const NICKNAME_LOG_CHANNEL_ID  = '1557761519045840956';
-const KICK_LOG_CHANNEL_ID      = '';
-const GENERAL_LOG_CHANNEL_ID   = '';
+/* --- Logs Channels --- */
+const ROLE_LOG_CHANNEL_ID        = '1557761485961171085';
+const MUTE_LOG_CHANNEL_ID        = '1558158698805723226';
+const MOVE_LOG_CHANNEL_ID        = '1558625461821640808';
+const BAN_LOG_CHANNEL_ID         = '1558158791659229354';
+const TIMEOUT_LOG_CHANNEL_ID     = '1558158765453484182';
+const NICKNAME_LOG_CHANNEL_ID    = '1557761519045840956';
+const KICK_LOG_CHANNEL_ID        = '';
+const GENERAL_LOG_CHANNEL_ID     = '';
 
-// Manual action logs (بدون command)
+/* --- Manual Action Logs --- */
 const MANUAL_MOVE_LOG_CHANNEL_ID = '1558625461821640808';
 const MANUAL_BAN_LOG_CHANNEL_ID  = '1559282035502358649';
 const MANUAL_MUTE_LOG_CHANNEL_ID = '1559282210731728976';
 
-// Verify
-const VERIFY_CHANNEL_ID        = '1558503393226530947';
-const VERIFY_IMAGE             = '';
-const UNVERIFIED_ROLE_ID       = '1557761141575262298';
-const VERIFIED_ROLE_ID         = '1557761111242051704';
+/* --- Verify --- */
+const VERIFY_CHANNEL_ID   = '1558503393226530947';
+const VERIFY_IMAGE        = '';
+const UNVERIFIED_ROLE_ID  = '1557761141575262298';
+const VERIFIED_ROLE_ID    = '1557761111242051704';
 
-// Apply
+/* --- Apply --- */
 const APPLY_STAFF_CHANNEL_ID   = '1557761363617521724';
 const APPLY_RESULTS_CHANNEL_ID = '1558583636025147505';
 
-// Staff roles
+/* --- Staff Roles --- */
 const HELPER_ROLE_ID  = '1557761089163231432';
 const MOD_ROLE_ID     = '1557761087380652043';
 const ADMIN_ROLE_ID   = '1557761086147666011';
@@ -62,22 +66,22 @@ const HEAD_ROLE_ID    = '1557761065545240587';
 const COOWNER_ROLE_ID = '1557761063452156034';
 const OWNER_ROLE_ID   = '1557761062013763655';
 
-// Codes
+/* --- Codes --- */
 const BOT_WHITELIST_CODE  = '1235';
 const LINK_WHITELIST_CODE = '1235';
 
-// Tickets
-const TICKET_PANEL_CHANNEL_ID = '';       // فارغ = كيستعمل الروم الحالي
-const TICKET_CATEGORY_ID      = '';       // فارغ = بلا كاتيغوري
+/* --- Tickets --- */
+const TICKET_PANEL_CHANNEL_ID = '';
+const TICKET_CATEGORY_ID      = '';
 const TICKET_SUPPORT_ROLE_ID  = '1557761090069471313';
 const TICKET_LOG_CHANNEL_ID   = '1557761467393245276';
-const TICKET_PANEL_IMAGE      = 'https://i.postimg.cc/nhG6tKTM/ddddddd.jpg';
+const TICKET_PANEL_IMAGE      = 'https://i.postimg.cc/nhG6tKTM/dddddddd.jpg';
 
-// Minecraft
+/* --- Minecraft --- */
 const MC_SERVER_IP = 'play.khobzasmp.com';
 const MC_STORE_URL = 'https://store.khobzasmp.com';
 
-// Data folder (local)
+/* --- Data folder --- */
 const DATA_DIR = path.join(__dirname, 'data');
 
 /* ===================== CLIENT ===================== */
@@ -187,10 +191,9 @@ const ticketConfig = loadJson(path.join(DATA_DIR, 'ticket-config.json'), { ticke
 if (!ticketConfig.tickets) ticketConfig.tickets = {};
 
 /* ============================================================
- *  ⚠️ LINK DETECTION — Only detects URLs
+ *  LINK DETECTION
  * ============================================================ */
 const ANY_URL_PATTERN = /(https?:\/\/[^\s<>]+)|(www\.[^\s<>]+\.[a-z]{2,}[^\s<>]*)/i;
-
 function containsAnyLink(content) {
   if (!content) return null;
   const m = content.match(ANY_URL_PATTERN);
@@ -1357,8 +1360,9 @@ client.once('ready', async () => {
   console.log('==============================');
   console.log(`[READY] Logged in as ${client.user.tag}`);
   console.log(`[READY] Guilds: ${client.guilds.cache.size}`);
-  console.log(`[READY] All IDs hardcoded ✅`);
-  console.log(`[READY] Manual actions logged ✅`);
+  console.log(`[READY] Anti-Link: ACTIVE`);
+  console.log(`[READY] Manual logs: ACTIVE`);
+  console.log(`[READY] Ticket System: READY`);
   console.log('==============================');
   client.user.setActivity('𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 🍞', { type: ActivityType.Watching });
   await restoreAllVoiceConnections();
@@ -1575,7 +1579,7 @@ client.on('messageReactionRemove', async (reaction, user) => {
 });
 
 /* ============================================================
- *  🎯 EVENT: VOICE STATE UPDATE (Manual Move / Mute / Unmute)
+ *  🎯 VOICE STATE (Manual Move / Mute / Unmute)
  * ============================================================ */
 client.on('voiceStateUpdate', async (oldState, newState) => {
   if (newState.id === client.user.id && newState.guild) {
@@ -1649,7 +1653,7 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
 });
 
 /* ============================================================
- *  🎯 EVENT: MEMBER UPDATE (Manual Nickname / Role)
+ *  🎯 MEMBER UPDATE (Nickname / Role)
  * ============================================================ */
 client.on('guildMemberUpdate', async (o, n) => {
   if (o.nickname !== n.nickname) {
@@ -1674,7 +1678,7 @@ client.on('guildMemberUpdate', async (o, n) => {
 });
 
 /* ============================================================
- *  🎯 EVENT: MEMBER REMOVE (Kick / Leave)
+ *  🎯 MEMBER REMOVE (Kick / Leave)
  * ============================================================ */
 client.on('guildMemberRemove', async member => {
   const exec = await auditExec(member.guild, AuditLogEvent.MemberKick, member.id);
@@ -1684,7 +1688,7 @@ client.on('guildMemberRemove', async member => {
 });
 
 /* ============================================================
- *  🎯 EVENT: BAN (Manual or via command)
+ *  🎯 BAN (Manual or via command)
  * ============================================================ */
 client.on('guildBanAdd', async ban => {
   const exec = await auditExec(ban.guild, AuditLogEvent.MemberBanAdd, ban.user.id);
@@ -1811,11 +1815,4 @@ process.on('uncaughtException', e => console.error('[uncaughtException]', e));
 /* ============================================================
  *                     LOGIN
  * ============================================================ */
-if (TOKEN === 'PUT_YOUR_BOT_TOKEN_HERE') {
-  console.error('❌❌❌ [FATAL] You must edit index.js and put your bot token!');
-  console.error('Open index.js and find: const TOKEN = "PUT_YOUR_BOT_TOKEN_HERE";');
-  console.error('Replace with your actual token, then restart.');
-  process.exit(1);
-}
-
 client.login(TOKEN);
