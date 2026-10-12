@@ -1,9 +1,8 @@
 /* ============================================================
  *  𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 Discord Bot — Full Version
- *  - ANY link posted by ANYONE → DELETED
- *  - Bot replies with BIG message: "ry7 t9wd lah yn3l tbon mok"
- *  - Only !link whitelisted users can bypass
- *  - Even Owner/Admin cannot bypass
+ *  - !khtar <messageID> → pick a random winner from reactions
+ *  - ANY link → DELETED + "ry7 t9wd lah yn3l tbon mok"
+ *  - Auto-fetches role names from Discord
  * ============================================================ */
 require('dotenv').config();
 
@@ -406,6 +405,123 @@ async function sendWelcome(guild, member) {
  *                       COMMANDS
  * ============================================================ */
 const commands = {};
+
+/* ============================================================
+ *  ⭐ !khtar <messageID> — Pick a random winner from reactions
+ *  Usage: !khtar <messageID>
+ *  - Fetches the message
+ *  - Collects all users who reacted (excluding bots)
+ *  - Picks ONE random winner
+ *  - Announces in English: "Congratulations, you won the giveaway!"
+ * ============================================================ */
+commands.khtar = {
+  cat: 'Fun',
+  desc: 'Pick a random winner from a message reactions',
+  usage: 'khtar <messageID>',
+  async run(m, a) {
+    const tier = getStaffTier(m.member);
+    if (!tier || !tier.canGiveaway) return m.reply({ embeds: [errE('❌ No permission (Moderator+).')] });
+
+    const messageId = (a[0] || '').replace(/[<>&]/g, '').trim();
+    if (!messageId || !/^\d{17,20}$/.test(messageId)) {
+      return m.reply({ embeds: [
+        errE('❌ Invalid Message ID', 'Usage: `!khtar <messageID>`\n\nMake sure you provided a valid message ID.\nEnable **Developer Mode** in Discord settings to copy IDs.')
+      ] });
+    }
+
+    // Fetch the message
+    let targetMsg;
+    try {
+      targetMsg = await m.channel.messages.fetch(messageId);
+    } catch (e) {
+      return m.reply({ embeds: [
+        errE('❌ Message Not Found', 'I couldn\'t find a message with that ID in this channel.\n\nMake sure:\n• The message is in **this channel**.\n• The ID is correct.\n• I have **Read Message History** permission.')
+      ] });
+    }
+
+    // Collect all users who reacted
+    const reactors = new Set();
+
+    if (targetMsg.reactions.cache.size === 0) {
+      return m.reply({ embeds: [errE('❌ No Reactions', 'This message has no reactions to pick from.')] });
+    }
+
+    // Fetch reactions (fetch all pages to get everyone)
+    for (const [, reaction] of targetMsg.reactions.cache) {
+      let lastId;
+      let fetched;
+      do {
+        const options = { limit: 100 };
+        if (lastId) options.after = lastId;
+        fetched = await reaction.users.fetch(options).catch(() => null);
+        if (!fetched || fetched.size === 0) break;
+        fetched.forEach(u => {
+          if (!u.bot) reactors.add(u.id);
+        });
+        lastId = fetched.last()?.id;
+      } while (fetched && fetched.size === 100);
+    }
+
+    const participants = [...reactors];
+
+    if (participants.length === 0) {
+      return m.reply({ embeds: [errE('❌ No Participants', 'No valid (non-bot) users reacted to this message.')] });
+    }
+
+    // Pick a random winner
+    const winnerId = participants[Math.floor(Math.random() * participants.length)];
+
+    // Send "picking" message
+    const pickMsg = await m.channel.send({ embeds: [
+      new EmbedBuilder()
+        .setColor(C.warn)
+        .setTitle('🎲 Picking a random winner...')
+        .setDescription(`**${participants.length}** participants detected.\nChoosing randomly... 🎯`)
+        .setFooter({ text: 'Khobza SMP • Giveaway Pick' })
+        .setTimestamp()
+    ] });
+
+    // Wait a moment for effect
+    await new Promise(r => setTimeout(r, 2500));
+
+    // Delete "picking" message
+    await pickMsg.delete().catch(()=>{});
+
+    // Send winner announcement
+    const winnerEmbed = new EmbedBuilder()
+      .setColor(C.ok)
+      .setTitle('🎉 CONGRATULATIONS! 🎉')
+      .setDescription(
+        `## 🏆 Winner: <@${winnerId}>\n\n` +
+        `**Congratulations, you won the giveaway!** 🎁\n\n` +
+        `> Claim your prize by contacting a staff member.\n\n` +
+        `**Total participants:** ${participants.length}\n` +
+        `**Message:** [Jump to message](${targetMsg.url})`
+      )
+      .setThumbnail(client.users.cache.get(winnerId)?.displayAvatarURL({ size: 256 }) || null)
+      .setFooter({ text: 'Khobza SMP • Giveaway Winner' })
+      .setTimestamp();
+
+    await m.channel.send({ content: `🎉 <@${winnerId}>`, embeds: [winnerEmbed] });
+
+    // Log it
+    if (GENERAL_LOG_CHANNEL_ID) {
+      sendLog(m.guild, GENERAL_LOG_CHANNEL_ID,
+        okE('🎲 Giveaway Pick').addFields(
+          { name: 'Winner', value: `<@${winnerId}> (\`${winnerId}\`)`, inline: true },
+          { name: 'Picked by', value: `${m.author.tag} (${tier.label})`, inline: true },
+          { name: 'Participants', value: `${participants.length}`, inline: true },
+          { name: 'Message', value: `[Jump](${targetMsg.url})`, inline: false }
+        ));
+    }
+
+    console.log(`[KHTAR] ${m.author.tag} picked ${winnerId} from ${participants.length} participants.`);
+  }
+};
+
+// Alternative aliases
+commands.pick = commands.khtar;
+commands.choose_winner = commands.khtar;
 
 /* ============================================================
  *  !link — Manage link-whitelist
@@ -1095,6 +1211,7 @@ client.once('ready', async () => {
   console.log(`[READY] Link-whitelist: ${Object.keys(linkWhitelist.users).length} user(s)`);
   console.log(`[READY] Bot-whitelist: ${Object.keys(botWhitelist.bots).length} bot(s)`);
   console.log(`[READY] ANY link → DELETED + "ry7 t9wd lah yn3l tbon mok"`);
+  console.log(`[READY] !khtar command loaded ✨`);
   for (const [, guild] of client.guilds.cache) {
     console.log(`[READY] Guild: ${guild.name}`);
     for (const r of STAFF_ROLES) {
@@ -1372,16 +1489,13 @@ client.on('messageCreate', async message => {
    *  ⚠️ ANTI-LINK PROTECTION — ANY LINK IS DELETED
    *  Reply: "ry7 t9wd lah yn3l tbon mok" (BIG)
    *  Only !link whitelisted users can bypass.
-   *  Even Owner / Administrator cannot bypass.
    * ============================================================ */
   if (!isLinkWhitelisted(message.author.id)) {
     const linkFound = containsAnyLink(message.content);
 
     if (linkFound) {
-      /* Delete the message immediately */
       await message.delete().catch(() => {});
 
-      /* Send the big warning embed */
       const warning = new EmbedBuilder()
         .setColor(0xff0000)
         .setTitle('# ry7 t9wd lah yn3l tbon mok')
@@ -1396,12 +1510,10 @@ client.on('messageCreate', async message => {
         .setFooter({ text: '𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 • Anti-Link Protection' })
         .setTimestamp();
 
-      /* Send as a normal message with the author mentioned */
       message.channel.send({ content: `<@${message.author.id}>`, embeds: [warning] })
         .then(msg => setTimeout(() => msg.delete().catch(()=>{}), 15000))
         .catch(() => {});
 
-      /* Log */
       if (GENERAL_LOG_CHANNEL_ID) {
         sendLog(message.guild, GENERAL_LOG_CHANNEL_ID,
           errE('🚫 Link Blocked').addFields(
