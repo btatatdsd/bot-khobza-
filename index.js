@@ -1,6 +1,5 @@
 /* ============================================================
- *  𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 Discord Bot — Full Version
- *  + Ticket System + Manual Action Logs (move/ban/mute without command)
+ *  𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 Discord Bot — Full Version (Fixed)
  * ============================================================ */
 require('dotenv').config();
 
@@ -28,7 +27,6 @@ const NICKNAME_LOG_CHANNEL_ID  = process.env.NICKNAME_LOG_CHANNEL_ID || '1557761
 const KICK_LOG_CHANNEL_ID      = process.env.KICK_LOG_CHANNEL_ID || '';
 const GENERAL_LOG_CHANNEL_ID   = process.env.GENERAL_LOG_CHANNEL_ID || '';
 
-/* === Manual action logs (actions done WITHOUT command) === */
 const MANUAL_MOVE_LOG_CHANNEL_ID = process.env.MANUAL_MOVE_LOG_CHANNEL_ID || MOVE_LOG_CHANNEL_ID;
 const MANUAL_BAN_LOG_CHANNEL_ID  = process.env.MANUAL_BAN_LOG_CHANNEL_ID  || '1559282035502358649';
 const MANUAL_MUTE_LOG_CHANNEL_ID = process.env.MANUAL_MUTE_LOG_CHANNEL_ID || '1559282210731728976';
@@ -62,7 +60,6 @@ const OWNER_ROLE_ID   = process.env.OWNER_ROLE_ID   || '1557761062013763655';
 const BOT_WHITELIST_CODE  = process.env.BOT_WHITELIST_CODE  || '1235';
 const LINK_WHITELIST_CODE = process.env.LINK_WHITELIST_CODE || '1235';
 
-/* === Ticket System === */
 const TICKET_PANEL_CHANNEL_ID = process.env.TICKET_PANEL_CHANNEL_ID || '';
 const TICKET_CATEGORY_ID      = process.env.TICKET_CATEGORY_ID      || '';
 const TICKET_SUPPORT_ROLE_ID  = process.env.TICKET_SUPPORT_ROLE_ID  || '1557761090069471313';
@@ -90,12 +87,12 @@ const C = { ok: 0x57f287, err: 0xed4245, info: 0x5865f2, warn: 0xfee75c, giveawa
 
 /* ===================== TICKET TYPES ===================== */
 const TICKET_TYPES = {
-  pub:    { id: 'pub',    label: 'Pub',    emoji: '🔥', title: 'Pub Report',           desc: 'Report spam or pub',         color: 0xed4245 },
-  bugs:   { id: 'bugs',   label: 'Bugs',   emoji: '🐛', title: 'Bug Report',           desc: 'Report bugs or issues',      color: 0x57f287 },
-  abuse:  { id: 'abuse',  label: 'Abuse',  emoji: '⚔️', title: 'Abuse Report',         desc: 'Report abuse or harassment', color: 0xeb459e },
+  pub:    { id: 'pub',    label: 'Pub',    emoji: '🔥', title: 'Pub Report',             desc: 'Report spam or pub',         color: 0xed4245 },
+  bugs:   { id: 'bugs',   label: 'Bugs',   emoji: '🐛', title: 'Bug Report',             desc: 'Report bugs or issues',      color: 0x57f287 },
+  abuse:  { id: 'abuse',  label: 'Abuse',  emoji: '⚔️', title: 'Abuse Report',           desc: 'Report abuse or harassment', color: 0xeb459e },
   server: { id: 'server', label: 'Server', emoji: '🔒', title: 'Server Info / Requests', desc: 'Server info or requests',    color: 0x5865f2 },
-  staff:  { id: 'staff',  label: 'Staff',  emoji: '🛠️', title: 'Staff Abuse Report',   desc: 'Report staff issues',        color: 0xfee75c },
-  donate: { id: 'donate', label: 'Donate', emoji: '💰', title: 'Donation Support',     desc: 'Support The Server',         color: 0xf0c264 }
+  staff:  { id: 'staff',  label: 'Staff',  emoji: '🛠️', title: 'Staff Abuse Report',     desc: 'Report staff issues',        color: 0xfee75c },
+  donate: { id: 'donate', label: 'Donate', emoji: '💰', title: 'Donation Support',       desc: 'Support The Server',         color: 0xf0c264 }
 };
 
 /* ===================== APPLY QUESTIONS ===================== */
@@ -404,8 +401,7 @@ async function sendWelcome(guild, member) {
   if (!WELCOME_CHANNEL_ID) return { ok: false, reason: 'ID empty' };
   let ch = guild.channels.cache.get(WELCOME_CHANNEL_ID);
   if (!ch) ch = await guild.channels.fetch(WELCOME_CHANNEL_ID).catch(()=>null);
-  if (!ch) return { ok: false, reason: 'Channel not found' };
-  if (!ch.isTextBased()) return { ok: false, reason: 'Not text-based' };
+  if (!ch || typeof ch.isTextBased !== 'function' || !ch.isTextBased()) return { ok: false, reason: 'Channel not found' };
   const perms = ch.permissionsFor(guild.members.me);
   if (!perms?.has(PermissionFlagsBits.ViewChannel) || !perms?.has(PermissionFlagsBits.SendMessages))
     return { ok: false, reason: 'Missing permissions' };
@@ -426,7 +422,7 @@ async function sendWelcome(guild, member) {
 const commands = {};
 
 /* ============================================================
- *  🎫 !ticketpanel
+ *  🎫 !ticketpanel — Send ticket panel (FIXED)
  * ============================================================ */
 commands.ticketpanel = {
   cat: 'Tickets', desc: 'Send the ticket support panel', usage: 'ticketpanel',
@@ -434,11 +430,27 @@ commands.ticketpanel = {
     if (!has(m.member, PermissionFlagsBits.Administrator))
       return m.reply({ embeds: [errE('❌ Admin only.')] });
 
-    const ch = m.guild.channels.cache.get(TICKET_PANEL_CHANNEL_ID)
-            || await m.guild.channels.fetch(TICKET_PANEL_CHANNEL_ID).catch(()=>null)
-            || m.channel;
+    // === Safe channel resolution ===
+    let ch = null;
 
-    if (!ch || !ch.isTextBased()) return m.reply({ embeds: [errE('❌ Panel channel not found.')] });
+    // 1) Try the configured panel channel ID
+    if (TICKET_PANEL_CHANNEL_ID && /^\d{17,20}$/.test(String(TICKET_PANEL_CHANNEL_ID).trim())) {
+      ch = m.guild.channels.cache.get(String(TICKET_PANEL_CHANNEL_ID).trim());
+      if (!ch) {
+        ch = await m.guild.channels.fetch(String(TICKET_PANEL_CHANNEL_ID).trim()).catch(() => null);
+      }
+    }
+
+    // 2) Fallback: use the current channel
+    if (!ch) ch = m.channel;
+
+    // 3) Validate
+    if (!ch) {
+      return m.reply({ embeds: [errE('❌ Panel channel not found.', 'Make sure `TICKET_PANEL_CHANNEL_ID` is a valid channel ID.')] });
+    }
+    if (typeof ch.isTextBased !== 'function' || !ch.isTextBased()) {
+      return m.reply({ embeds: [errE('❌ Panel channel is not a text channel.', `Current: \`${ch.name || ch.id || 'unknown'}\``)] });
+    }
 
     const embed = new EmbedBuilder()
       .setColor(0x5865f2)
@@ -475,7 +487,10 @@ commands.ticketpanel = {
     try {
       await ch.send({ embeds: [embed], components: [row1, row2] });
       m.reply({ embeds: [okE('✅ Ticket Panel Sent', `In ${ch}`)] }).catch(()=>{});
-    } catch (e) { m.reply({ embeds: [errE('❌ Failed', e.message)] }); }
+    } catch (e) {
+      console.error('[TICKETPANEL]', e);
+      m.reply({ embeds: [errE('❌ Failed', e.message)] });
+    }
   }
 };
 
@@ -496,7 +511,7 @@ commands.ticketclose = {
     await m.channel.send({ embeds: [
       new EmbedBuilder().setColor(0xed4245)
         .setTitle('🔒 Ticket Closing')
-        .setDescription(`This ticket will be closed in **5 seconds** by ${m.author}.\nReason: \`${tier || isTicketStaff ? 'Staff action' : 'User closed'}\``)
+        .setDescription(`This ticket will be closed in **5 seconds** by ${m.author}.`)
         .setTimestamp()
     ] });
 
@@ -673,8 +688,8 @@ commands.pick = commands.khtar;
 /* ---------- VERIFY / APPLY PANELS ---------- */
 commands.verifypanel = { cat: 'Verify', desc: 'Send verification panel', async run(m) {
   if (!has(m.member, PermissionFlagsBits.Administrator)) return m.reply({ embeds: [errE('❌ Admin only.')] });
-  const ch = m.guild.channels.cache.get(VERIFY_CHANNEL_ID) || await m.guild.channels.fetch(VERIFY_CHANNEL_ID).catch(()=>null);
-  if (!ch || !ch.isTextBased()) return m.reply({ embeds: [errE('Channel not found.')] });
+  let ch = m.guild.channels.cache.get(VERIFY_CHANNEL_ID) || await m.guild.channels.fetch(VERIFY_CHANNEL_ID).catch(()=>null);
+  if (!ch || typeof ch.isTextBased !== 'function' || !ch.isTextBased()) return m.reply({ embeds: [errE('Channel not found.')] });
   const embed = new EmbedBuilder().setColor(0x2b2d31).setTitle('✅ Verification')
     .setDescription('**Welcome to 𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷!**\n\nClick the button below to verify.')
     .setFooter({ text: '𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 • Verification' }).setTimestamp();
@@ -688,7 +703,7 @@ commands.verifypanel = { cat: 'Verify', desc: 'Send verification panel', async r
 commands.applypanel = { cat: 'Verify', desc: 'Send apply panel', usage: 'applypanel [imageURL]', async run(m, a) {
   if (!has(m.member, PermissionFlagsBits.Administrator)) return m.reply({ embeds: [errE('❌ Admin only.')] });
   const ch = m.guild.channels.cache.get(APPLY_STAFF_CHANNEL_ID) || await m.guild.channels.fetch(APPLY_STAFF_CHANNEL_ID).catch(()=>null);
-  if (!ch || !ch.isTextBased()) return m.reply({ embeds: [errE('Channel not found.')] });
+  if (!ch || typeof ch.isTextBased !== 'function' || !ch.isTextBased()) return m.reply({ embeds: [errE('Channel not found.')] });
 
   let imageURL = (a[0] || '').trim();
   if (!imageURL && m.attachments.size) imageURL = m.attachments.first().url;
@@ -1060,7 +1075,6 @@ commands.choose = { cat: 'Utility', desc: 'Choose', async run(m, a) {
 }};
 commands.coinflip = { cat: 'Utility', desc: 'Coin', async run(m) { m.reply({ embeds: [okE('🪙', Math.random() < 0.5 ? 'Heads' : 'Tails')] }); }};
 
-/* ---------- SMP ---------- */
 commands.ip = { cat: 'SMP', desc: 'IP', async run(m) { m.reply({ embeds: [infoE('🖥️', `\`\`\`${MC_SERVER_IP}\`\`\``)] }); }};
 commands.serverstatus = { cat: 'SMP', desc: 'Status', async run(m) {
   try {
@@ -1072,7 +1086,6 @@ commands.serverstatus = { cat: 'SMP', desc: 'Status', async run(m) {
 commands.rules = { cat: 'SMP', desc: 'Rules', async run(m) { m.reply({ embeds: [infoE('📜 Rules', '1. Be respectful.\n2. No hacks.\n3. No griefing.\n4. No spam.\n5. Follow staff.')] }); }};
 commands.store = { cat: 'SMP', desc: 'Store', async run(m) { m.reply({ embeds: [infoE('🛒', MC_STORE_URL)] }); }};
 
-/* ---------- VOICE ---------- */
 commands.addvoice = { cat: 'Voice', desc: 'Join voice 24/7', usage: 'addvoice <id>', async run(m, a) {
   const tier = getStaffTier(m.member);
   if (!tier || tier.rank < 7) return m.reply({ embeds: [errE('❌ No permission.')] });
@@ -1109,7 +1122,11 @@ async function createTicket(guild, user, typeKey) {
     }
   }
 
-  const category = TICKET_CATEGORY_ID ? guild.channels.cache.get(TICKET_CATEGORY_ID) : null;
+  let category = null;
+  if (TICKET_CATEGORY_ID && /^\d{17,20}$/.test(String(TICKET_CATEGORY_ID).trim())) {
+    category = guild.channels.cache.get(String(TICKET_CATEGORY_ID).trim());
+    if (!category) category = await guild.channels.fetch(String(TICKET_CATEGORY_ID).trim()).catch(()=>null);
+  }
 
   let newChannel;
   try {
@@ -1177,7 +1194,6 @@ client.once('ready', async () => {
   console.log(`[READY] Manual Move Log: ${MANUAL_MOVE_LOG_CHANNEL_ID}`);
   console.log(`[READY] Manual Ban Log: ${MANUAL_BAN_LOG_CHANNEL_ID}`);
   console.log(`[READY] Manual Mute Log: ${MANUAL_MUTE_LOG_CHANNEL_ID}`);
-  console.log(`[READY] Open tickets: ${Object.keys(ticketConfig.tickets).length}`);
   console.log('==============================');
   client.user.setActivity('𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 🍞', { type: ActivityType.Watching });
   await restoreAllVoiceConnections();
@@ -1236,7 +1252,7 @@ client.on(Events.InteractionCreate, async interaction => {
   if (!interaction.isButton()) return;
   const btnId = interaction.customId;
 
-  /* === TICKET BUTTONS === */
+  /* === TICKET CREATE BUTTONS === */
   if (btnId.startsWith('ticket_') && !['ticket_close', 'ticket_claim'].includes(btnId)) {
     const typeKey = btnId.replace('ticket_', '');
     if (!TICKET_TYPES[typeKey]) return interaction.reply({ embeds: [errE('❌ Invalid type.')], ephemeral: true });
@@ -1357,7 +1373,7 @@ client.on(Events.InteractionCreate, async interaction => {
   }
 
   if (btnId.startsWith('apply_reject_')) {
-    const tier = getStaffTier(m.member);
+    const tier = getStaffTier(interaction.member);
     if (!tier || tier.rank < 3) return interaction.reply({ embeds: [errE('❌ Admin only.')], ephemeral: true });
     const userId = btnId.replace('apply_reject_', '');
     try {
@@ -1403,14 +1419,9 @@ client.on('messageReactionRemove', async (reaction, user) => {
 
 /* ============================================================
  *  🎯 EVENT: VOICE STATE UPDATE
- *  - Bot 24/7 reconnect
- *  - Restore mutes
- *  - ⭐ DETECT MANUAL MOVE (بلا كموند)
- *  - ⭐ DETECT MANUAL MUTE (بلا كموند)
  * ============================================================ */
 client.on('voiceStateUpdate', async (oldState, newState) => {
 
-  /* --- Bot 24/7 reconnect --- */
   if (newState.id === client.user.id && newState.guild) {
     const saved = voiceConfig[newState.guild.id];
     if (!saved) return;
@@ -1424,48 +1435,37 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
     return;
   }
 
-  /* --- Restore mute on rejoin --- */
   const key = `${newState.guild?.id}:${newState.id}`;
   if (activeMutes[key] && newState.channelId && !newState.serverMute) {
     try { await newState.setMute(true, 'Restoring voice mute'); } catch {}
   }
 
-  /* --- Skip if not a valid guild update --- */
   if (!newState.guild) return;
   if (!newState.member || newState.member.user.bot) return;
 
-  /* ============================================================
-   *  ⭐ MANUAL MOVE DETECTION (someone moved a member without command)
-   * ============================================================ */
+  /* Manual Move detection */
   if (oldState.channelId && newState.channelId && oldState.channelId !== newState.channelId) {
-    // Check if executed by someone else (via Audit Log)
     setTimeout(async () => {
       try {
         const exec = await auditExec(newState.guild, AuditLogEvent.MemberMove, newState.id);
-        // Only log if executor is NOT the bot itself
         if (exec && exec.id !== client.user.id) {
-          const oldCh = oldState.channel;
-          const newCh = newState.channel;
           const e = infoE('➡️ Member Moved (Manual)').addFields(
             { name: 'Member', value: `${newState.member.user.tag} (\`${newState.member.id}\`)`, inline: true },
             { name: 'By', value: `${exec.tag} (\`${exec.id}\`)`, inline: true },
-            { name: 'From', value: oldCh ? `${oldCh}` : '*unknown*', inline: true },
-            { name: 'To', value: newCh ? `${newCh}` : '*unknown*', inline: true }
+            { name: 'From', value: oldState.channel ? `${oldState.channel}` : '*unknown*', inline: true },
+            { name: 'To', value: newState.channel ? `${newState.channel}` : '*unknown*', inline: true }
           );
           sendLog(newState.guild, MANUAL_MOVE_LOG_CHANNEL_ID, e);
         }
-      } catch (e) { /* silent */ }
-    }, 1500); // wait for audit log to update
+      } catch (e) {}
+    }, 1500);
   }
 
-  /* ============================================================
-   *  ⭐ MANUAL MUTE DETECTION (someone server-muted a member without command)
-   * ============================================================ */
+  /* Manual Mute detection */
   if (!oldState.serverMute && newState.serverMute) {
     setTimeout(async () => {
       try {
         const exec = await auditExec(newState.guild, AuditLogEvent.MemberUpdate, newState.id);
-        // Only log if executor is NOT the bot itself
         if (exec && exec.id !== client.user.id) {
           const e = errE('🔇 Member Voice Muted (Manual)').addFields(
             { name: 'Member', value: `${newState.member.user.tag} (\`${newState.member.id}\`)`, inline: true },
@@ -1474,11 +1474,11 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
           );
           sendLog(newState.guild, MANUAL_MUTE_LOG_CHANNEL_ID, e);
         }
-      } catch (e) { /* silent */ }
+      } catch (e) {}
     }, 1500);
   }
 
-  /* === Manual Unmute detection === */
+  /* Manual Unmute detection */
   if (oldState.serverMute && !newState.serverMute) {
     setTimeout(async () => {
       try {
@@ -1490,13 +1490,13 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
           );
           sendLog(newState.guild, MANUAL_MUTE_LOG_CHANNEL_ID, e);
         }
-      } catch (e) { /* silent */ }
+      } catch (e) {}
     }, 1500);
   }
 });
 
 /* ============================================================
- *             EVENT: LOGS (existing)
+ *             EVENT: LOGS
  * ============================================================ */
 client.on('guildMemberUpdate', async (o, n) => {
   if (o.nickname !== n.nickname) {
@@ -1527,23 +1527,14 @@ client.on('guildMemberRemove', async member => {
   sendLog(member.guild, KICK_LOG_CHANNEL_ID || GENERAL_LOG_CHANNEL_ID, e);
 });
 
-/* ============================================================
- *  ⭐ EVENT: BAN (manual or via command)
- *  Route to MANUAL_BAN_LOG_CHANNEL_ID if not done by the bot
- * ============================================================ */
 client.on('guildBanAdd', async ban => {
   const exec = await auditExec(ban.guild, AuditLogEvent.MemberBanAdd, ban.user.id);
-
-  // If executed by the bot via !ban command → goes to BAN_LOG_CHANNEL_ID
-  // If executed manually by a user → goes to MANUAL_BAN_LOG_CHANNEL_ID
   const isManual = exec && exec.id !== client.user.id;
-
   const e = errE(isManual ? '🔨 Member Banned (Manual)' : '🔨 Member Banned').addFields(
     { name: 'User', value: `${ban.user.tag} (\`${ban.user.id}\`)`, inline: true },
     { name: 'By', value: exec ? `${exec.tag} (\`${exec.id}\`)` : 'Unknown', inline: true },
     { name: 'Reason', value: ban.reason || 'None', inline: false }
   );
-
   const channel = isManual ? MANUAL_BAN_LOG_CHANNEL_ID : BAN_LOG_CHANNEL_ID;
   sendLog(ban.guild, channel, e);
 });
@@ -1554,7 +1545,6 @@ client.on('guildBanAdd', async ban => {
 client.on('messageCreate', async message => {
   if (message.author.bot) return;
 
-  /* DM handling */
   if (!message.guild) {
     const userId = message.author.id;
     if (!dmApplications.has(userId)) return;
@@ -1571,7 +1561,7 @@ client.on('messageCreate', async message => {
       await message.reply({ embeds: [okE('✅ Application Sent!')] }).catch(()=>{});
       const guild = client.guilds.cache.get(app.guildId);
       const resultsCh = guild?.channels.cache.get(APPLY_RESULTS_CHANNEL_ID);
-      if (!resultsCh || !resultsCh.isTextBased()) return;
+      if (!resultsCh || typeof resultsCh.isTextBased !== 'function' || !resultsCh.isTextBased()) return;
       const isMc = app.type === 'Minecraft Staff';
       const embed = new EmbedBuilder().setColor(isMc ? C.ok : C.info)
         .setTitle(`📝 New Application — ${app.type}`)
@@ -1596,7 +1586,7 @@ client.on('messageCreate', async message => {
     return;
   }
 
-  /* ============ ANTI-LINK ============ */
+  /* Anti-Link */
   if (!isLinkWhitelisted(message.author.id)) {
     const linkFound = containsAnyLink(message.content);
     if (linkFound) {
@@ -1621,7 +1611,6 @@ client.on('messageCreate', async message => {
     }
   }
 
-  /* AFK handling */
   if (afks.has(message.author.id) && !message.content.startsWith(PREFIX + 'afk')) {
     afks.delete(message.author.id);
     message.reply({ embeds: [okE('👋 Welcome back')] }).then(x => setTimeout(() => x.delete().catch(()=>{}), 5000)).catch(()=>{});
@@ -1629,7 +1618,6 @@ client.on('messageCreate', async message => {
 
   const usr = eco(message.author.id); usr.msgs += 1;
 
-  /* Command dispatch */
   if (!message.content.startsWith(PREFIX)) return;
   const args = message.content.slice(PREFIX.length).trim().split(/\s+/);
   const name = args.shift().toLowerCase();
