@@ -12,7 +12,7 @@ const {
   ActionRowBuilder, ButtonBuilder, ButtonStyle, Events,
   ModalBuilder, TextInputBuilder, TextInputStyle
 } = require('discord.js');
-const { joinVoiceChannel, getVoiceConnection, VoiceConnectionStatus, entersState } = require('@discordjs/voice');
+const { joinVoiceChannel, getVoiceConnsdsdsdsdsection, VoiceConnectionStatus, entersState } = require('@discordjs/voice');
 const fs = require('fs');
 const path = require('path');
 
