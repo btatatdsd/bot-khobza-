@@ -1,8 +1,10 @@
 /* ============================================================
  *  𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 Discord Bot — Full Version
- *  - !khtar <messageID> → pick a random winner from reactions
+ *  - Ticket Support System (panel + buttons)
+ *  - !khtar <messageID> — random winner
  *  - ANY link → DELETED + "ry7 t9wd lah yn3l tbon mok"
- *  - Auto-fetches role names from Discord
+ *  - Anti unauthorized bot
+ *  - Role names auto-fetched from Discord
  * ============================================================ */
 require('dotenv').config();
 
@@ -37,6 +39,7 @@ const MUTE_CFG_FILE            = path.join(DATA_DIR, 'mute-config.json');
 const GIVEAWAY_CFG_FILE        = path.join(DATA_DIR, 'giveaway-config.json');
 const BOTWL_CFG_FILE           = path.join(DATA_DIR, 'bot-whitelist.json');
 const LINKWL_CFG_FILE          = path.join(DATA_DIR, 'link-whitelist.json');
+const TICKET_CFG_FILE          = path.join(DATA_DIR, 'ticket-config.json');
 const RECONNECT_DELAY          = 5000;
 const VERIFY_CHANNEL_ID        = process.env.VERIFY_CHANNEL_ID || '1558503393226530947';
 const VERIFY_IMAGE             = process.env.VERIFY_IMAGE || '';
@@ -57,6 +60,13 @@ const OWNER_ROLE_ID   = process.env.OWNER_ROLE_ID   || '1557761062013763655';
 const BOT_WHITELIST_CODE  = process.env.BOT_WHITELIST_CODE  || '1235';
 const LINK_WHITELIST_CODE = process.env.LINK_WHITELIST_CODE || '1235';
 
+/* === Ticket System === */
+const TICKET_PANEL_CHANNEL_ID  = process.env.TICKET_PANEL_CHANNEL_ID  || '';
+const TICKET_CATEGORY_ID       = process.env.TICKET_CATEGORY_ID       || '';
+const TICKET_SUPPORT_ROLE_ID   = process.env.TICKET_SUPPORT_ROLE_ID   || ADMIN_ROLE_ID;
+const TICKET_LOG_CHANNEL_ID    = process.env.TICKET_LOG_CHANNEL_ID    || '';
+const TICKET_PANEL_IMAGE       = process.env.TICKET_PANEL_IMAGE       || 'https://i.postimg.cc/nhG6tKTM/ddddddd.jpg';
+
 if (!TOKEN) { console.error('[FATAL] DISCORD_TOKEN missing.'); process.exit(1); }
 
 /* ===================== CLIENT ===================== */
@@ -74,7 +84,59 @@ const client = new Client({
   partials: [Partials.Channel, Partials.Message, Partials.GuildMember, Partials.User, Partials.Reaction]
 });
 
-const C = { ok: 0x57f287, err: 0xed4245, info: 0x5865f2, warn: 0xfee75c, giveaway: 0xeb459e };
+const C = { ok: 0x57f287, err: 0xed4245, info: 0x5865f2, warn: 0xfee75c, giveaway: 0xeb459e, ticket: 0x5865f2 };
+
+/* ===================== TICKET CATEGORIES ===================== */
+const TICKET_TYPES = {
+  pub: {
+    id: 'pub',
+    label: 'Pub',
+    emoji: '🔥',
+    title: 'Pub Report',
+    desc: 'Report spam or pub',
+    color: 0xed4245
+  },
+  bugs: {
+    id: 'bugs',
+    label: 'Bugs',
+    emoji: '🐛',
+    title: 'Bug Report',
+    desc: 'Report bugs or issues',
+    color: 0x57f287
+  },
+  abuse: {
+    id: 'abuse',
+    label: 'Abuse',
+    emoji: '⚔️',
+    title: 'Abuse Report',
+    desc: 'Report abuse or harassment',
+    color: 0xeb459e
+  },
+  server: {
+    id: 'server',
+    label: 'Server',
+    emoji: '🔒',
+    title: 'Server Info / Requests',
+    desc: 'Server info or requests',
+    color: 0x5865f2
+  },
+  staff: {
+    id: 'staff',
+    label: 'Staff',
+    emoji: '🛠️',
+    title: 'Staff Abuse Report',
+    desc: 'Report staff issues',
+    color: 0xfee75c
+  },
+  donate: {
+    id: 'donate',
+    label: 'Donate',
+    emoji: '💰',
+    title: 'Donation Support',
+    desc: 'Support The Server',
+    color: 0xf0c264
+  }
+};
 
 /* ===================== APPLY QUESTIONS ===================== */
 const APPLY_QUESTIONS = [
@@ -156,8 +218,22 @@ const linkWhitelist = loadJson(LINKWL_CFG_FILE, { users: {} });
 if (!linkWhitelist.users) linkWhitelist.users = {};
 const isLinkWhitelisted = id => !!linkWhitelist.users[id];
 
+/* ===================== TICKETS STORAGE ===================== */
+/*
+ * ticket-config.json:
+ * {
+ *   "tickets": {
+ *     "<channelId>": {
+ *       userId, username, type, typeLabel, createdAt, claimedBy, status
+ *     }
+ *   }
+ * }
+ */
+const ticketConfig = loadJson(TICKET_CFG_FILE, { tickets: {} });
+if (!ticketConfig.tickets) ticketConfig.tickets = {};
+
 /* ============================================================
- *  LINK DETECTION — catches ANY URL
+ *  LINK DETECTION
  * ============================================================ */
 const ANY_URL_PATTERN = /(https?:\/\/[^\s<>]+)|(www\.[^\s<>]+\.[a-z]{2,}[^\s<>]*)|((?:discord\.gg|discord\.com\/invite)\/[^\s<>]+)/i;
 
@@ -407,128 +483,112 @@ async function sendWelcome(guild, member) {
 const commands = {};
 
 /* ============================================================
- *  ⭐ !khtar <messageID> — Pick a random winner from reactions
- *  Usage: !khtar <messageID>
- *  - Fetches the message
- *  - Collects all users who reacted (excluding bots)
- *  - Picks ONE random winner
- *  - Announces in English: "Congratulations, you won the giveaway!"
+ *  🎫 !ticketpanel — Send the ticket support panel
  * ============================================================ */
-commands.khtar = {
-  cat: 'Fun',
-  desc: 'Pick a random winner from a message reactions',
-  usage: 'khtar <messageID>',
-  async run(m, a) {
-    const tier = getStaffTier(m.member);
-    if (!tier || !tier.canGiveaway) return m.reply({ embeds: [errE('❌ No permission (Moderator+).')] });
+commands.ticketpanel = {
+  cat: 'Tickets',
+  desc: 'Send the ticket support panel',
+  usage: 'ticketpanel',
+  async run(m) {
+    if (!has(m.member, PermissionFlagsBits.Administrator))
+      return m.reply({ embeds: [errE('❌ Admin only.')] });
 
-    const messageId = (a[0] || '').replace(/[<>&]/g, '').trim();
-    if (!messageId || !/^\d{17,20}$/.test(messageId)) {
-      return m.reply({ embeds: [
-        errE('❌ Invalid Message ID', 'Usage: `!khtar <messageID>`\n\nMake sure you provided a valid message ID.\nEnable **Developer Mode** in Discord settings to copy IDs.')
-      ] });
-    }
+    const ch = m.guild.channels.cache.get(TICKET_PANEL_CHANNEL_ID)
+            || await m.guild.channels.fetch(TICKET_PANEL_CHANNEL_ID).catch(()=>null)
+            || m.channel;
 
-    // Fetch the message
-    let targetMsg;
-    try {
-      targetMsg = await m.channel.messages.fetch(messageId);
-    } catch (e) {
-      return m.reply({ embeds: [
-        errE('❌ Message Not Found', 'I couldn\'t find a message with that ID in this channel.\n\nMake sure:\n• The message is in **this channel**.\n• The ID is correct.\n• I have **Read Message History** permission.')
-      ] });
-    }
+    if (!ch || !ch.isTextBased())
+      return m.reply({ embeds: [errE('❌ Ticket panel channel not found.')] });
 
-    // Collect all users who reacted
-    const reactors = new Set();
-
-    if (targetMsg.reactions.cache.size === 0) {
-      return m.reply({ embeds: [errE('❌ No Reactions', 'This message has no reactions to pick from.')] });
-    }
-
-    // Fetch reactions (fetch all pages to get everyone)
-    for (const [, reaction] of targetMsg.reactions.cache) {
-      let lastId;
-      let fetched;
-      do {
-        const options = { limit: 100 };
-        if (lastId) options.after = lastId;
-        fetched = await reaction.users.fetch(options).catch(() => null);
-        if (!fetched || fetched.size === 0) break;
-        fetched.forEach(u => {
-          if (!u.bot) reactors.add(u.id);
-        });
-        lastId = fetched.last()?.id;
-      } while (fetched && fetched.size === 100);
-    }
-
-    const participants = [...reactors];
-
-    if (participants.length === 0) {
-      return m.reply({ embeds: [errE('❌ No Participants', 'No valid (non-bot) users reacted to this message.')] });
-    }
-
-    // Pick a random winner
-    const winnerId = participants[Math.floor(Math.random() * participants.length)];
-
-    // Send "picking" message
-    const pickMsg = await m.channel.send({ embeds: [
-      new EmbedBuilder()
-        .setColor(C.warn)
-        .setTitle('🎲 Picking a random winner...')
-        .setDescription(`**${participants.length}** participants detected.\nChoosing randomly... 🎯`)
-        .setFooter({ text: 'Khobza SMP • Giveaway Pick' })
-        .setTimestamp()
-    ] });
-
-    // Wait a moment for effect
-    await new Promise(r => setTimeout(r, 2500));
-
-    // Delete "picking" message
-    await pickMsg.delete().catch(()=>{});
-
-    // Send winner announcement
-    const winnerEmbed = new EmbedBuilder()
-      .setColor(C.ok)
-      .setTitle('🎉 CONGRATULATIONS! 🎉')
+    const embed = new EmbedBuilder()
+      .setColor(0x5865f2)
+      .setTitle('🎫 𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 • Ticket Support System')
       .setDescription(
-        `## 🏆 Winner: <@${winnerId}>\n\n` +
-        `**Congratulations, you won the giveaway!** 🎁\n\n` +
-        `> Claim your prize by contacting a staff member.\n\n` +
-        `**Total participants:** ${participants.length}\n` +
-        `**Message:** [Jump to message](${targetMsg.url})`
+        '• We want to keep our community **safe, friendly, and fun** for everyone. ' +
+        'To help with this, we have a report system you can use to tell us about any problems or questions you have. ' +
+        'Here\'s a quick look at the different parts of our report system: `·͜·`\n\n' +
+        '• 🔥 **Pub**: Report spam or pub\n' +
+        '• 🐛 **Bugs**: Report bugs or issues\n' +
+        '• ⚔️ **Abuse**: Report abuse or harassment\n' +
+        '• 🔒 **Server**: Server info or requests\n' +
+        '• 🛠️ **Staff Abuse**: Report staff issues\n' +
+        '• 💰 **Donate**: Support The Server\n\n' +
+        '• 🌸 *Use these modules for assistance or to report issues.* Our team is here to help!'
       )
-      .setThumbnail(client.users.cache.get(winnerId)?.displayAvatarURL({ size: 256 }) || null)
-      .setFooter({ text: 'Khobza SMP • Giveaway Winner' })
+      .setThumbnail(m.guild.iconURL({ size: 256 }) || null)
+      .setFooter({ text: '𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 • Support System' })
       .setTimestamp();
 
-    await m.channel.send({ content: `🎉 <@${winnerId}>`, embeds: [winnerEmbed] });
+    if (TICKET_PANEL_IMAGE) embed.setImage(TICKET_PANEL_IMAGE);
 
-    // Log it
-    if (GENERAL_LOG_CHANNEL_ID) {
-      sendLog(m.guild, GENERAL_LOG_CHANNEL_ID,
-        okE('🎲 Giveaway Pick').addFields(
-          { name: 'Winner', value: `<@${winnerId}> (\`${winnerId}\`)`, inline: true },
-          { name: 'Picked by', value: `${m.author.tag} (${tier.label})`, inline: true },
-          { name: 'Participants', value: `${participants.length}`, inline: true },
-          { name: 'Message', value: `[Jump](${targetMsg.url})`, inline: false }
-        ));
+    const row1 = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('ticket_pub').setLabel('Pub').setEmoji('🔥').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('ticket_bugs').setLabel('Bugs').setEmoji('🐛').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('ticket_abuse').setLabel('Abuse').setEmoji('⚔️').setStyle(ButtonStyle.Secondary)
+    );
+
+    const row2 = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('ticket_server').setLabel('Server').setEmoji('🔒').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('ticket_staff').setLabel('Staff').setEmoji('🛠️').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('ticket_donate').setLabel('Donate').setEmoji('💰').setStyle(ButtonStyle.Secondary)
+    );
+
+    try {
+      await ch.send({ embeds: [embed], components: [row1, row2] });
+      m.reply({ embeds: [okE('✅ Ticket Panel Sent', `In ${ch}`)] }).catch(()=>{});
+    } catch (e) {
+      m.reply({ embeds: [errE('❌ Failed', e.message)] });
     }
-
-    console.log(`[KHTAR] ${m.author.tag} picked ${winnerId} from ${participants.length} participants.`);
   }
 };
 
-// Alternative aliases
-commands.pick = commands.khtar;
-commands.choose_winner = commands.khtar;
+/* ============================================================
+ *  🔒 !ticketclose — Close current ticket
+ * ============================================================ */
+commands.ticketclose = {
+  cat: 'Tickets',
+  desc: 'Close the current ticket',
+  usage: 'ticketclose',
+  async run(m) {
+    const ticket = ticketConfig.tickets[m.channel.id];
+    if (!ticket) return m.reply({ embeds: [errE('❌ This is not a ticket channel.')] });
+
+    const tier = getStaffTier(m.member);
+    const isOwner = ticket.userId === m.author.id;
+    if (!isOwner && !tier) return m.reply({ embeds: [errE('❌ Only staff or the ticket owner can close.')] });
+
+    await m.channel.send({ embeds: [
+      new EmbedBuilder()
+        .setColor(0xed4245)
+        .setTitle('🔒 Ticket Closing')
+        .setDescription(`This ticket will be closed in **5 seconds** by ${m.author}.\nReason: \`${tier ? 'Staff action' : 'User closed'}\``)
+        .setTimestamp()
+    ] });
+
+    // Log
+    if (TICKET_LOG_CHANNEL_ID) {
+      sendLog(m.guild, TICKET_LOG_CHANNEL_ID,
+        errE('🔒 Ticket Closed').addFields(
+          { name: 'Ticket', value: `${m.channel.name} (\`${m.channel.id}\`)`, inline: true },
+          { name: 'Opened by', value: `<@${ticket.userId}>`, inline: true },
+          { name: 'Closed by', value: `${m.author.tag}`, inline: true },
+          { name: 'Type', value: `\`${ticket.typeLabel}\``, inline: true }
+        ));
+    }
+
+    delete ticketConfig.tickets[m.channel.id];
+    saveJson(TICKET_CFG_FILE, ticketConfig);
+
+    setTimeout(() => m.channel.delete().catch(()=>{}), 5000);
+  }
+};
 
 /* ============================================================
  *  !link — Manage link-whitelist
  * ============================================================ */
 commands.link = {
   cat: 'Security',
-  desc: 'Manage link-whitelist (bypass link filter)',
+  desc: 'Manage link-whitelist',
   usage: 'link <add|remove|list> [@user|userID] [code]',
   async run(m, a) {
     const tier = getStaffTier(m.member);
@@ -547,11 +607,9 @@ commands.link = {
       if (!code) return m.reply({ embeds: [errE('❌ Provide the code.', `Usage: \`!link add ${targetUser.id} ${LINK_WHITELIST_CODE}\``)] });
       if (code !== LINK_WHITELIST_CODE) return m.reply({ embeds: [errE('❌ Invalid code.')] });
 
-      if (isLinkWhitelisted(targetUser.id)) return m.reply({ embeds: [infoE('ℹ️ Already whitelisted', `${targetUser.tag} ديجا فـ الـ whitelist.`)] });
+      if (isLinkWhitelisted(targetUser.id)) return m.reply({ embeds: [infoE('ℹ️ Already whitelisted', `${targetUser.tag}`)] });
 
-      linkWhitelist.users[targetUser.id] = {
-        addedBy: m.author.tag, addedById: m.author.id, addedAt: Date.now()
-      };
+      linkWhitelist.users[targetUser.id] = { addedBy: m.author.tag, addedById: m.author.id, addedAt: Date.now() };
       saveJson(LINKWL_CFG_FILE, linkWhitelist);
 
       const e = okE('✅ User Added to Link-Whitelist').addFields(
@@ -567,13 +625,13 @@ commands.link = {
       const targetMember = m.mentions.members.first() || await resolveMemberById(m.guild, a[1]);
       const targetUser = targetMember?.user || await client.users.fetch(String(a[1]).replace(/[<@!>]/g, '')).catch(()=>null);
       if (!targetUser) return m.reply({ embeds: [errE('❌ User not found.')] });
-      if (!isLinkWhitelisted(targetUser.id)) return m.reply({ embeds: [errE('❌ هاد العضو ماشي فـ الـ whitelist.')] });
+      if (!isLinkWhitelisted(targetUser.id)) return m.reply({ embeds: [errE('❌ Not whitelisted.')] });
 
       delete linkWhitelist.users[targetUser.id];
       saveJson(LINKWL_CFG_FILE, linkWhitelist);
 
       const e = okE('🗑️ User Removed from Link-Whitelist').addFields(
-        { name: 'User', value: `<@${targetUser.id}> (\`${targetUser.id}\`)`, inline: true },
+        { name: 'User', value: `<@${targetUser.id}>`, inline: true },
         { name: 'By', value: `${m.author.tag} (${tier.label})`, inline: true });
       m.reply({ embeds: [e] });
       sendLog(m.guild, GENERAL_LOG_CHANNEL_ID || BAN_LOG_CHANNEL_ID, e);
@@ -582,7 +640,7 @@ commands.link = {
 
     if (sub === 'list') {
       const entries = Object.entries(linkWhitelist.users);
-      if (!entries.length) return m.reply({ embeds: [infoE('🔗 Link-Whitelist', 'ما كاين حتى واحد فـ الـ whitelist.')] });
+      if (!entries.length) return m.reply({ embeds: [infoE('🔗 Link-Whitelist', 'Empty.')] });
       const list = entries.map(([id, data], i) =>
         `**#${i+1}** <@${id}> (\`${id}\`)\n  *Added by ${data.addedBy} • <t:${Math.floor(data.addedAt/1000)}:R>*`
       ).join('\n');
@@ -592,9 +650,9 @@ commands.link = {
 
     m.reply({ embeds: [infoE('🔗 Link Whitelist',
       '**Usage:**\n' +
-      '`!link add <@user|userID> <code>` — Whitelist a user (can post any link)\n' +
-      '`!link remove <@user|userID>` — Remove from whitelist\n' +
-      '`!link list` — Show all whitelisted users')] });
+      '`!link add <@user|userID> <code>`\n' +
+      '`!link remove <@user|userID>`\n' +
+      '`!link list`')] });
   }
 };
 
@@ -636,6 +694,84 @@ commands.wyhlist = { cat: 'Security', desc: 'List whitelisted bots', async run(m
   m.reply({ embeds: [infoE(`🤖 Whitelisted Bots (${entries.length})`).setDescription(list.slice(0, 4000))] });
 }};
 
+/* ============================================================
+ *  !khtar <messageID> — Pick a random winner
+ * ============================================================ */
+commands.khtar = {
+  cat: 'Fun',
+  desc: 'Pick a random winner from a message reactions',
+  usage: 'khtar <messageID>',
+  async run(m, a) {
+    const tier = getStaffTier(m.member);
+    if (!tier || !tier.canGiveaway) return m.reply({ embeds: [errE('❌ No permission (Moderator+).')] });
+
+    const messageId = (a[0] || '').replace(/[<>&]/g, '').trim();
+    if (!messageId || !/^\d{17,20}$/.test(messageId)) {
+      return m.reply({ embeds: [errE('❌ Invalid Message ID', 'Usage: `!khtar <messageID>`')] });
+    }
+
+    let targetMsg;
+    try { targetMsg = await m.channel.messages.fetch(messageId); }
+    catch (e) { return m.reply({ embeds: [errE('❌ Message Not Found', 'Make sure the ID is correct and the message is in this channel.')] }); }
+
+    if (targetMsg.reactions.cache.size === 0) {
+      return m.reply({ embeds: [errE('❌ No Reactions', 'This message has no reactions.')] });
+    }
+
+    const reactors = new Set();
+    for (const [, reaction] of targetMsg.reactions.cache) {
+      let lastId;
+      let fetched;
+      do {
+        const options = { limit: 100 };
+        if (lastId) options.after = lastId;
+        fetched = await reaction.users.fetch(options).catch(() => null);
+        if (!fetched || fetched.size === 0) break;
+        fetched.forEach(u => { if (!u.bot) reactors.add(u.id); });
+        lastId = fetched.last()?.id;
+      } while (fetched && fetched.size === 100);
+    }
+
+    const participants = [...reactors];
+    if (participants.length === 0) return m.reply({ embeds: [errE('❌ No Participants', 'No valid users reacted.')] });
+
+    const winnerId = participants[Math.floor(Math.random() * participants.length)];
+
+    const pickMsg = await m.channel.send({ embeds: [
+      new EmbedBuilder().setColor(C.warn)
+        .setTitle('🎲 Picking a random winner...')
+        .setDescription(`**${participants.length}** participants detected.\nChoosing randomly... 🎯`)
+        .setFooter({ text: 'Khobza SMP • Giveaway Pick' }).setTimestamp()
+    ] });
+
+    await new Promise(r => setTimeout(r, 2500));
+    await pickMsg.delete().catch(()=>{});
+
+    const winnerEmbed = new EmbedBuilder()
+      .setColor(C.ok).setTitle('🎉 CONGRATULATIONS! 🎉')
+      .setDescription(
+        `## 🏆 Winner: <@${winnerId}>\n\n` +
+        `**Congratulations, you won the giveaway!** 🎁\n\n` +
+        `> Claim your prize by contacting a staff member.\n\n` +
+        `**Total participants:** ${participants.length}\n` +
+        `**Message:** [Jump to message](${targetMsg.url})`
+      )
+      .setFooter({ text: 'Khobza SMP • Giveaway Winner' }).setTimestamp();
+
+    await m.channel.send({ content: `🎉 <@${winnerId}>`, embeds: [winnerEmbed] });
+
+    if (GENERAL_LOG_CHANNEL_ID) {
+      sendLog(m.guild, GENERAL_LOG_CHANNEL_ID,
+        okE('🎲 Giveaway Pick').addFields(
+          { name: 'Winner', value: `<@${winnerId}>`, inline: true },
+          { name: 'Picked by', value: `${m.author.tag} (${tier.label})`, inline: true },
+          { name: 'Participants', value: `${participants.length}`, inline: true }
+        ));
+    }
+  }
+};
+commands.pick = commands.khtar;
+
 /* ---------- VERIFY ---------- */
 commands.verifypanel = { cat: 'Verify', desc: 'Send verification panel', async run(m) {
   if (!has(m.member, PermissionFlagsBits.Administrator)) return m.reply({ embeds: [errE('❌ Admin only.')] });
@@ -643,7 +779,7 @@ commands.verifypanel = { cat: 'Verify', desc: 'Send verification panel', async r
   if (!ch || !ch.isTextBased()) return m.reply({ embeds: [errE('Channel not found.')] });
   const embed = new EmbedBuilder()
     .setColor(0x2b2d31).setTitle('✅ Verification')
-    .setDescription('**Welcome to 𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷!**\n\nClick the button below to verify and get access to all channels.')
+    .setDescription('**Welcome to 𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷!**\n\nClick the button below to verify and get access.')
     .setFooter({ text: '𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 • Verification' }).setTimestamp();
   if (VERIFY_IMAGE) embed.setImage(VERIFY_IMAGE);
   const row = new ActionRowBuilder().addComponents(
@@ -661,10 +797,7 @@ commands.applypanel = { cat: 'Verify', desc: 'Send apply panel', usage: 'applypa
 
   let imageURL = (a[0] || '').trim();
   if (!imageURL && m.attachments.size) imageURL = m.attachments.first().url;
-  if (!imageURL && m.reference?.messageId) {
-    const replied = await m.channel.messages.fetch(m.reference.messageId).catch(()=>null);
-    if (replied?.attachments.size) imageURL = replied.attachments.first().url;
-  }
+
   if (!imageURL) {
     await m.reply({ embeds: [infoE('🖼️ Send the image URL', 'Type `cancel` to abort. (60s)')] });
     const f = x => x.author.id === m.author.id && x.channel.id === m.channel.id;
@@ -682,7 +815,7 @@ commands.applypanel = { cat: 'Verify', desc: 'Send apply panel', usage: 'applypa
 
   const embed = new EmbedBuilder()
     .setColor(0x5865f2).setTitle('📝 Apply for Staff — 𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷')
-    .setDescription('**Want to become staff?**\n\n🎮 **Apply Staff Minecraft**\n💬 **Apply Staff Discord**\n\n**How it works:**\n1. Click a button below.\n2. The bot will DM you with questions.\n3. Answer all questions in DM.')
+    .setDescription('**Want to become staff?**\n\n🎮 **Apply Staff Minecraft**\n💬 **Apply Staff Discord**')
     .setFooter({ text: '𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 • Applications' }).setTimestamp();
   if (imageURL) embed.setImage(imageURL);
 
@@ -716,66 +849,19 @@ function buildStaffInfoEmbeds(guild) {
     details.addFields({ name: `#${r.rank} — ${displayName}`, value, inline: false });
   }
   embeds.push(details);
-
-  const logs = new EmbedBuilder().setColor(0x57f287).setTitle('📜 Log Channels')
-    .addFields(
-      { name: 'Ban',      value: BAN_LOG_CHANNEL_ID ? `<#${BAN_LOG_CHANNEL_ID}>` : '—', inline: true },
-      { name: 'Mute',     value: MUTE_LOG_CHANNEL_ID ? `<#${MUTE_LOG_CHANNEL_ID}>` : '—', inline: true },
-      { name: 'Move',     value: MOVE_LOG_CHANNEL_ID ? `<#${MOVE_LOG_CHANNEL_ID}>` : '—', inline: true },
-      { name: 'Timeout',  value: TIMEOUT_LOG_CHANNEL_ID ? `<#${TIMEOUT_LOG_CHANNEL_ID}>` : '—', inline: true },
-      { name: 'Nickname', value: NICKNAME_LOG_CHANNEL_ID ? `<#${NICKNAME_LOG_CHANNEL_ID}>` : '—', inline: true },
-      { name: 'Role',     value: ROLE_LOG_CHANNEL_ID ? `<#${ROLE_LOG_CHANNEL_ID}>` : '—', inline: true }
-    ).setTimestamp();
-  embeds.push(logs);
   return embeds;
 }
 
 commands.staffinfo = { cat: 'Utility', desc: 'Show all staff roles', async run(m) { await m.reply({ embeds: buildStaffInfoEmbeds(m.guild) }); }};
 commands.staff = commands.staffinfo;
-commands['roles-info'] = commands.staffinfo;
-
-commands.roleinfo = { cat: 'Utility', desc: 'Role info', usage: 'roleinfo <@role|roleID|all>', async run(m, a) {
-  const arg = (a[0] || '').toLowerCase();
-  if (arg === 'all') return m.reply({ embeds: buildStaffInfoEmbeds(m.guild) });
-  let r = m.mentions.roles.first();
-  if (!r && a[0] && /^\d{17,20}$/.test(a[0].replace(/[<@&>]/g, '')))
-    r = m.guild.roles.cache.get(a[0].replace(/[<@&>]/g, '')) || await m.guild.roles.fetch(a[0].replace(/[<@&>]/g, '')).catch(()=>null);
-  if (!r) r = m.guild.roles.cache.find(x => x.name.toLowerCase() === arg);
-  if (!r) return m.reply({ embeds: [errE('Role not found.')] });
-  const staffData = STAFF_ROLES.find(s => s.id === r.id);
-  const e = infoE(`🏷️ ${r.name}`).addFields(
-    { name: 'ID', value: `\`${r.id}\``, inline: true },
-    { name: 'Color', value: r.hexColor, inline: true },
-    { name: 'Members', value: `${r.members.size}`, inline: true },
-    { name: 'Position', value: `${r.position}`, inline: true }
-  );
-  if (staffData) e.addFields(
-    { name: '🎖️ Staff Rank', value: `#${staffData.rank} — ${r.name}`, inline: false },
-    { name: '🔇 Max Mute', value: fmtMinutes(staffData.maxMute), inline: true },
-    { name: '➡️ Move', value: staffData.canMove?'✅':'❌', inline: true },
-    { name: '⏳ Timeout', value: staffData.canTimeout?'✅':'❌', inline: true },
-    { name: '✏️ Nick', value: staffData.canNickname?'✅':'❌', inline: true },
-    { name: '👢 Kick', value: staffData.canKick?'✅':'❌', inline: true },
-    { name: '🔨 Ban', value: staffData.canBan?'✅':'❌', inline: true },
-    { name: '🎁 Giveaway', value: staffData.canGiveaway?'✅':'❌', inline: true }
-  );
-  m.reply({ embeds: [e] });
-}};
 
 /* ---------- DIAGNOSTIC ---------- */
-commands.intents = { cat: 'Utility', desc: 'Check intents', async run(m) {
-  if (!has(m.member, PermissionFlagsBits.Administrator)) return m.reply({ embeds: [errE('❌ Admin only.')] });
-  m.reply({ embeds: [infoE('🔍 Intents').setDescription(
-    `**Guilds**: ${client.guilds.cache.size}\n**Members**: ${m.guild.memberCount}\n**Cached**: ${m.guild.members.cache.size}\n\n**Members Intent**: ${m.guild.members.cache.size > 1 ? '✅ ON' : '❌ OFF'}`
-  )] });
-}};
 commands.mytier = { cat: 'Utility', desc: 'Your staff tier', async run(m) {
   const t = getStaffTier(m.member);
   if (!t) return m.reply({ embeds: [errE('❌ ما عندكش رتبة staff.')] });
   m.reply({ embeds: [infoE('🎖️ Staff Tier').addFields(
     { name: 'Rank', value: `#${t.rank} — ${t.label}`, inline: true },
     { name: 'Max Mute', value: fmtMinutes(t.maxMute), inline: true },
-    { name: 'Min Mute', value: `${t.minMute} min`, inline: true },
     { name: 'Move', value: t.canMove?'✅':'❌', inline: true },
     { name: 'Timeout', value: t.canTimeout?'✅':'❌', inline: true },
     { name: 'Nickname', value: t.canNickname?'✅':'❌', inline: true },
@@ -831,7 +917,7 @@ commands.mute = { cat: 'Moderation', desc: 'Voice-mute', usage: 'mute <@user|use
   if (!reason) return m.reply({ embeds: [errE('❌ Provide reason.')] });
   let minutes = 0, permanent = false;
   if (durArg === 'perm' || durArg === 'permanent') {
-    if (tier.maxMute !== -1) return m.reply({ embeds: [errE(`❌ Max for ${tier.label}: ${fmtMinutes(tier.maxMute)}.`)] });
+    if (tier.maxMute !== -1) return m.reply({ embeds: [errE(`❌ Max: ${fmtMinutes(tier.maxMute)}.`)] });
     permanent = true;
   } else {
     minutes = parseInt(durArg, 10);
@@ -839,7 +925,7 @@ commands.mute = { cat: 'Moderation', desc: 'Voice-mute', usage: 'mute <@user|use
     if (minutes < tier.minMute) return m.reply({ embeds: [errE(`Min: ${tier.minMute}m.`)] });
     if (tier.maxMute !== -1 && minutes > tier.maxMute) {
       if (tier.rank === 1) return m.reply({ embeds: [errE('❌ mymknch aw9 rak 4a helper', 'Max Helper: 10 min.')] });
-      return m.reply({ embeds: [errE(`❌ Max for ${tier.label}: ${fmtMinutes(tier.maxMute)}.`)] });
+      return m.reply({ embeds: [errE(`❌ Max: ${fmtMinutes(tier.maxMute)}.`)] });
     }
   }
   if (!target.voice?.channel) return m.reply({ embeds: [errE('❌ Not in voice.')] });
@@ -870,7 +956,6 @@ commands.unmute = { cat: 'Moderation', desc: 'Unmute', usage: 'unmute <@user|use
     const key = `${m.guild.id}:${t.id}`;
     if (activeMutes[key]) { delete activeMutes[key]; saveJson(MUTE_CFG_FILE, activeMutes); if (muteTimers.has(key)) { clearTimeout(muteTimers.get(key)); muteTimers.delete(key); } }
     m.reply({ embeds: [okE('🔊 Unmuted', t.user.tag)] });
-    sendLog(m.guild, MUTE_LOG_CHANNEL_ID, okE('🔊 Unmuted').addFields({ name: 'User', value: t.user.tag, inline: true }, { name: 'By', value: m.author.tag, inline: true }));
   } catch (err) { m.reply({ embeds: [errE('Failed', err.message)] }); }
 }};
 
@@ -903,7 +988,6 @@ commands.untimeout = { cat: 'Moderation', desc: 'Remove timeout', usage: 'untime
   try {
     await target.timeout(null, `Untimeout by ${m.author.tag}`);
     m.reply({ embeds: [okE('✅ Timeout removed', target.user.tag)] });
-    sendLog(m.guild, TIMEOUT_LOG_CHANNEL_ID, okE('✅ Timeout Removed').addFields({ name: 'User', value: target.user.tag, inline: true }, { name: 'By', value: m.author.tag, inline: true }));
   } catch (err) { m.reply({ embeds: [errE('Failed', err.message)] }); }
 }};
 
@@ -1066,21 +1150,6 @@ commands.gend = { cat: 'Fun', desc: 'Force-end giveaway', usage: 'gend <msgID>',
   await endGiveaway(id);
   m.reply({ embeds: [okE('✅ Ended', `\`${id}\``)] }).catch(()=>{});
 }};
-commands.greroll = { cat: 'Fun', desc: 'Re-roll winners', usage: 'greroll <msgID>', async run(m, a) {
-  const tier = getStaffTier(m.member);
-  if (!tier || !tier.canGiveaway) return m.reply({ embeds: [errE('❌ No permission.')] });
-  const id = (a[0] || '').trim(); if (!id) return m.reply({ embeds: [errE('Usage: `!greroll <msgID>`')] });
-  const gw = activeGiveaways[id]; if (!gw) return m.reply({ embeds: [errE('Not found.')] });
-  if (!gw.ended) return m.reply({ embeds: [errE('Still running.')] });
-  const entries = [...new Set(gw.entries)].filter(uid => { const m2 = m.guild.members.cache.get(uid); return m2 && !m2.user.bot; });
-  const newWinners = []; const pool = [...entries];
-  while (newWinners.length < gw.winners && pool.length > 0) { const idx = Math.floor(Math.random() * pool.length); newWinners.push(pool[idx]); pool.splice(idx, 1); }
-  if (!newWinners.length) return m.reply({ embeds: [errE('No entries.')] });
-  gw.winnerIds = newWinners; saveJson(GIVEAWAY_CFG_FILE, activeGiveaways);
-  const channel = m.guild.channels.cache.get(gw.channelId);
-  if (channel) channel.send({ content: `🔄 **Re-roll!** ${newWinners.map(x=>`<@${x}>`).join(', ')} won **${gw.prize}**!` }).catch(()=>{});
-  m.reply({ embeds: [okE('✅ Re-rolled', newWinners.map(x=>`<@${x}>`).join(', '))] });
-}};
 
 /* ---------- MEMBERS ---------- */
 commands.userinfo = { cat: 'Members', desc: 'User info', usage: 'userinfo [@user|userID]', async run(m, a) {
@@ -1153,10 +1222,6 @@ commands.choose = { cat: 'Utility', desc: 'Choose', usage: 'choose a b c', async
   m.reply({ embeds: [okE('🎲', a[Math.floor(Math.random()*a.length)])] });
 }};
 commands.coinflip = { cat: 'Utility', desc: 'Coin', async run(m) { m.reply({ embeds: [okE('🪙', Math.random() < 0.5 ? 'Heads' : 'Tails')] }); }};
-commands['8ball'] = { cat: 'Utility', desc: '8-ball', usage: '8ball Q?', async run(m, a) {
-  const ans = ['Yes.','No.','Maybe.','Definitely.','Absolutely not.','Ask again.','I doubt it.','For sure!','Unlikely.'];
-  m.reply({ embeds: [infoE('🎱', `❓ ${a.join(' ') || '...'}\n💬 **${ans[Math.floor(Math.random()*ans.length)]}**`)] });
-}};
 
 /* ---------- SMP ---------- */
 commands.ip = { cat: 'SMP', desc: 'IP', async run(m) { m.reply({ embeds: [infoE('🖥️', `\`\`\`${MC_SERVER_IP}\`\`\``)] }); }};
@@ -1167,16 +1232,8 @@ commands.serverstatus = { cat: 'SMP', desc: 'Status', async run(m) {
     m.reply({ embeds: [infoE('🎮').addFields({ name: 'Players', value: `${r.players?.online ?? 0}/${r.players?.max ?? 0}`, inline: true }, { name: 'Version', value: r.version || '?', inline: true })] });
   } catch { m.reply({ embeds: [errE('API.')] }); }
 }};
-commands.rules = { cat: 'SMP', desc: 'Rules', async run(m) { m.reply({ embeds: [infoE('📜 Rules', '1. Be respectful.\n2. No hacks.\n3. No griefing.\n4. No spam.\n5. Follow staff instructions.')] }); }};
+commands.rules = { cat: 'SMP', desc: 'Rules', async run(m) { m.reply({ embeds: [infoE('📜 Rules', '1. Be respectful.\n2. No hacks.\n3. No griefing.\n4. No spam.\n5. Follow staff.')] }); }};
 commands.store = { cat: 'SMP', desc: 'Store', async run(m) { m.reply({ embeds: [infoE('🛒', MC_STORE_URL)] }); }};
-commands.mcuser = { cat: 'SMP', desc: 'MC lookup', usage: 'mcuser <name>', async run(m, a) {
-  if (!a[0]) return m.reply({ embeds: [errE('Provide username.')] });
-  try {
-    const r = await fetch(`https://api.mojang.com/users/profiles/minecraft/${a[0]}`).then(x => x.ok ? x.json() : null);
-    if (!r) return m.reply({ embeds: [errE('Not found.')] });
-    m.reply({ embeds: [infoE(`🎮 ${r.name}`).setThumbnail(`https://mc-heads.net/avatar/${r.id}/128`).addFields({ name: 'UUID', value: r.id })] });
-  } catch { m.reply({ embeds: [errE('Failed.')] }); }
-}};
 
 /* ---------- VOICE ---------- */
 commands.addvoice = { cat: 'Voice', desc: 'Join voice 24/7', usage: 'addvoice <voiceChannelId>', async run(m, a) {
@@ -1201,6 +1258,91 @@ commands.removevoice = { cat: 'Voice', desc: 'Disconnect', async run(m) {
 }};
 
 /* ============================================================
+ *  🎫 TICKET CREATION FUNCTION
+ * ============================================================ */
+async function createTicket(guild, user, typeKey) {
+  const type = TICKET_TYPES[typeKey];
+  if (!type) return { ok: false, reason: 'Invalid type' };
+
+  // Check if user already has an open ticket of same type
+  for (const [chId, t] of Object.entries(ticketConfig.tickets)) {
+    if (t.userId === user.id && t.type === typeKey && t.status === 'open') {
+      const existingCh = guild.channels.cache.get(chId);
+      if (existingCh) return { ok: false, reason: `already_open`, channel: existingCh };
+      else { delete ticketConfig.tickets[chId]; saveJson(TICKET_CFG_FILE, ticketConfig); }
+    }
+  }
+
+  // Create the ticket channel
+  const category = TICKET_CATEGORY_ID ? guild.channels.cache.get(TICKET_CATEGORY_ID) : null;
+
+  let newChannel;
+  try {
+    newChannel = await guild.channels.create({
+      name: `ticket-${typeKey}-${user.username}`.slice(0, 100).toLowerCase().replace(/[^a-z0-9-]/g, '-'),
+      type: ChannelType.GuildText,
+      parent: category || undefined,
+      topic: `Ticket by ${user.tag} • Type: ${type.title}`,
+      permissionOverwrites: [
+        { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
+        { id: user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.EmbedLinks] },
+        { id: TICKET_SUPPORT_ROLE_ID, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageMessages, PermissionFlagsBits.AttachFiles] },
+        { id: client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageChannels, PermissionFlagsBits.ManageMessages, PermissionFlagsBits.ReadMessageHistory] }
+      ]
+    });
+  } catch (e) {
+    return { ok: false, reason: `Failed to create channel: ${e.message}` };
+  }
+
+  ticketConfig.tickets[newChannel.id] = {
+    userId: user.id,
+    username: user.tag,
+    type: typeKey,
+    typeLabel: type.label,
+    createdAt: Date.now(),
+    claimedBy: null,
+    status: 'open'
+  };
+  saveJson(TICKET_CFG_FILE, ticketConfig);
+
+  // Send welcome embed in the ticket
+  const welcome = new EmbedBuilder()
+    .setColor(type.color)
+    .setTitle(`${type.emoji} ${type.title}`)
+    .setDescription(
+      `مرحبا <@${user.id}>! 👋\n\n` +
+      `شكراً على تواصلك معنا. **الـ Staff** غادي يجاوبك قريباً.\n\n` +
+      `**Type:** \`${type.title}\`\n` +
+      `**Description:** ${type.desc}\n` +
+      `**Opened:** <t:${Math.floor(Date.now()/1000)}:R>\n\n` +
+      `> 🌸 Please describe your issue in detail so we can help you faster.`
+    )
+    .setFooter({ text: '𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 • Support System' })
+    .setTimestamp();
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('ticket_claim').setLabel('Claim').setEmoji('📌').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('ticket_close').setLabel('Close').setEmoji('🔒').setStyle(ButtonStyle.Danger)
+  );
+
+  try {
+    await newChannel.send({ content: `<@${user.id}> <@&${TICKET_SUPPORT_ROLE_ID}>`, embeds: [welcome], components: [row] });
+  } catch (e) { console.error('[TICKET] welcome msg:', e.message); }
+
+  // Log
+  if (TICKET_LOG_CHANNEL_ID) {
+    sendLog(guild, TICKET_LOG_CHANNEL_ID,
+      infoE('🎫 Ticket Opened').addFields(
+        { name: 'User', value: `<@${user.id}> (\`${user.id}\`)`, inline: true },
+        { name: 'Type', value: `\`${type.label}\``, inline: true },
+        { name: 'Channel', value: `<#${newChannel.id}>`, inline: true }
+      ));
+  }
+
+  return { ok: true, channel: newChannel };
+}
+
+/* ============================================================
  *                     EVENT: READY
  * ============================================================ */
 client.once('ready', async () => {
@@ -1208,17 +1350,10 @@ client.once('ready', async () => {
   console.log(`[READY] Logged in as ${client.user.tag}`);
   console.log(`[READY] Guilds: ${client.guilds.cache.size}`);
   console.log(`[READY] Staff roles: ${STAFF_ROLES.length}`);
-  console.log(`[READY] Link-whitelist: ${Object.keys(linkWhitelist.users).length} user(s)`);
-  console.log(`[READY] Bot-whitelist: ${Object.keys(botWhitelist.bots).length} bot(s)`);
-  console.log(`[READY] ANY link → DELETED + "ry7 t9wd lah yn3l tbon mok"`);
-  console.log(`[READY] !khtar command loaded ✨`);
-  for (const [, guild] of client.guilds.cache) {
-    console.log(`[READY] Guild: ${guild.name}`);
-    for (const r of STAFF_ROLES) {
-      const role = guild.roles.cache.get(r.id);
-      console.log(`[READY]  #${r.rank} → ${role ? role.name : '(NOT FOUND)'}`);
-    }
-  }
+  console.log(`[READY] Ticket types: ${Object.keys(TICKET_TYPES).length}`);
+  console.log(`[READY] Ticket panel channel: ${TICKET_PANEL_CHANNEL_ID || '(not set — will default to command channel)'}`);
+  console.log(`[READY] Ticket support role: ${TICKET_SUPPORT_ROLE_ID}`);
+  console.log(`[READY] Open tickets: ${Object.keys(ticketConfig.tickets).length}`);
   console.log('==============================');
   client.user.setActivity('𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 🍞', { type: ActivityType.Watching });
   await restoreAllVoiceConnections();
@@ -1259,6 +1394,7 @@ client.on('guildMemberAdd', async member => {
  * ============================================================ */
 client.on(Events.InteractionCreate, async interaction => {
 
+  /* ============ MODAL SUBMIT ============ */
   if (interaction.isModalSubmit()) {
     const id = interaction.customId;
     if (id.startsWith('wyh_modal_')) {
@@ -1273,9 +1409,6 @@ client.on(Events.InteractionCreate, async interaction => {
       botWhitelist.bots[targetId] = { addedBy: interaction.user.tag, addedById: interaction.user.id, addedAt: Date.now() };
       saveJson(BOTWL_CFG_FILE, botWhitelist);
       await interaction.reply({ embeds: [okE('✅ Bot Whitelisted', `<@${targetId}> added.`)], ephemeral: true });
-      sendLog(interaction.guild, BAN_LOG_CHANNEL_ID, okE('✅ Bot Whitelisted').addFields(
-        { name: 'Bot', value: `<@${targetId}>`, inline: true },
-        { name: 'By', value: `${interaction.user.tag} (${tier.label})`, inline: true }));
       return;
     }
     return;
@@ -1284,6 +1417,83 @@ client.on(Events.InteractionCreate, async interaction => {
   if (!interaction.isButton()) return;
   const btnId = interaction.customId;
 
+  /* ============ TICKET BUTTONS ============ */
+  if (btnId.startsWith('ticket_') && !['ticket_close', 'ticket_claim'].includes(btnId)) {
+    const typeKey = btnId.replace('ticket_', '');
+    const type = TICKET_TYPES[typeKey];
+    if (!type) return interaction.reply({ embeds: [errE('❌ Invalid ticket type.')], ephemeral: true });
+
+    await interaction.deferReply({ ephemeral: true });
+
+    const result = await createTicket(interaction.guild, interaction.user, typeKey);
+
+    if (!result.ok) {
+      if (result.reason === 'already_open') {
+        return interaction.editReply({ embeds: [errE('❌ You already have an open ticket.', `Go to ${result.channel}`)] });
+      }
+      return interaction.editReply({ embeds: [errE('❌ Failed to create ticket.', result.reason)] });
+    }
+
+    return interaction.editReply({ embeds: [okE('✅ Ticket Created', `Your ticket: ${result.channel}`)] });
+  }
+
+  /* ============ TICKET CLOSE ============ */
+  if (btnId === 'ticket_close') {
+    const ticket = ticketConfig.tickets[interaction.channel.id];
+    if (!ticket) return interaction.reply({ embeds: [errE('❌ This is not a ticket.')], ephemeral: true });
+
+    const tier = getStaffTier(interaction.member);
+    const isOwner = ticket.userId === interaction.user.id;
+    if (!isOwner && !tier) return interaction.reply({ embeds: [errE('❌ Only staff or ticket owner can close.')], ephemeral: true });
+
+    await interaction.reply({ embeds: [
+      new EmbedBuilder().setColor(0xed4245)
+        .setTitle('🔒 Closing Ticket')
+        .setDescription(`This ticket will be closed in **5 seconds** by ${interaction.user}.\nReason: \`${tier ? 'Staff action' : 'Owner closed'}\``)
+        .setTimestamp()
+    ] });
+
+    if (TICKET_LOG_CHANNEL_ID) {
+      sendLog(interaction.guild, TICKET_LOG_CHANNEL_ID,
+        errE('🔒 Ticket Closed').addFields(
+          { name: 'Ticket', value: `${interaction.channel.name}`, inline: true },
+          { name: 'Opened by', value: `<@${ticket.userId}>`, inline: true },
+          { name: 'Closed by', value: `${interaction.user.tag}`, inline: true }
+        ));
+    }
+
+    delete ticketConfig.tickets[interaction.channel.id];
+    saveJson(TICKET_CFG_FILE, ticketConfig);
+
+    setTimeout(() => interaction.channel.delete().catch(()=>{}), 5000);
+    return;
+  }
+
+  /* ============ TICKET CLAIM ============ */
+  if (btnId === 'ticket_claim') {
+    const ticket = ticketConfig.tickets[interaction.channel.id];
+    if (!ticket) return interaction.reply({ embeds: [errE('❌ This is not a ticket.')], ephemeral: true });
+
+    const tier = getStaffTier(interaction.member);
+    if (!tier) return interaction.reply({ embeds: [errE('❌ Only staff can claim tickets.')], ephemeral: true });
+
+    if (ticket.claimedBy) {
+      return interaction.reply({ embeds: [errE('❌ This ticket is already claimed by', `<@${ticket.claimedBy}>`)] , ephemeral: true });
+    }
+
+    ticket.claimedBy = interaction.user.id;
+    saveJson(TICKET_CFG_FILE, ticketConfig);
+
+    await interaction.reply({ embeds: [
+      new EmbedBuilder().setColor(0x57f287)
+        .setTitle('📌 Ticket Claimed')
+        .setDescription(`This ticket has been claimed by ${interaction.user}.\n\n**Type:** \`${ticket.typeLabel}\`\n**User:** <@${ticket.userId}>`)
+        .setTimestamp()
+    ] });
+    return;
+  }
+
+  /* ============ VERIFY BUTTON ============ */
   if (btnId === 'verify_button') {
     try {
       const guild = interaction.guild;
@@ -1300,6 +1510,7 @@ client.on(Events.InteractionCreate, async interaction => {
     return;
   }
 
+  /* ============ APPLY BUTTONS ============ */
   if (btnId === 'apply_minecraft' || btnId === 'apply_discord') {
     const userId = interaction.user.id;
     const isMc = btnId === 'apply_minecraft';
@@ -1486,9 +1697,8 @@ client.on('messageCreate', async message => {
   }
 
   /* ============================================================
-   *  ⚠️ ANTI-LINK PROTECTION — ANY LINK IS DELETED
-   *  Reply: "ry7 t9wd lah yn3l tbon mok" (BIG)
-   *  Only !link whitelisted users can bypass.
+   *  ⚠️ ANTI-LINK PROTECTION
+   *  Any link is DELETED with "ry7 t9wd lah yn3l tbon mok"
    * ============================================================ */
   if (!isLinkWhitelisted(message.author.id)) {
     const linkFound = containsAnyLink(message.content);
@@ -1527,7 +1737,7 @@ client.on('messageCreate', async message => {
     }
   }
 
-  /* ============ GUILD MESSAGE HANDLING ============ */
+  /* ============ AFK ============ */
   if (afks.has(message.author.id) && !message.content.startsWith(PREFIX + 'afk')) {
     afks.delete(message.author.id);
     message.reply({ embeds: [okE('👋 Welcome back', 'AFK removed.')] }).then(x => setTimeout(() => x.delete().catch(()=>{}), 5000)).catch(()=>{});
@@ -1550,20 +1760,11 @@ client.on('messageCreate', async message => {
   }
   if (settings.antimention && !has(message.member, PermissionFlagsBits.ManageMessages) && message.mentions.users.size >= 5)
     message.delete().catch(()=>{});
-  if (settings.automod && !has(message.member, PermissionFlagsBits.ManageMessages)) {
-    const bad = ['fuck','shit','bitch'];
-    if (bad.some(w => message.content.toLowerCase().includes(w))) message.delete().catch(()=>{});
-  }
 
   /* ============ COMMAND DISPATCH ============ */
   if (!message.content.startsWith(PREFIX)) return;
   const args = message.content.slice(PREFIX.length).trim().split(/\s+/);
   const name = args.shift().toLowerCase();
-
-  if (name === 'roll' && args[0]?.toLowerCase() === 'all' && args[1]?.toLowerCase() === 'info')
-    return commands.staffinfo.run(message, []);
-  if (name === 'role' && args[0]?.toLowerCase() === 'all' && args[1]?.toLowerCase() === 'info')
-    return commands.staffinfo.run(message, []);
 
   const cmd = commands[name];
   if (!cmd) return;
