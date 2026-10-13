@@ -1,7 +1,7 @@
 /* ============================================================
  *  𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 Discord Bot — Full Version
  *  - Strict hierarchy (Owner/Co-Owner are protected)
- *  - !addheyrol → hidden top role
+ *  - !addheyrol → hidden top role (CODE PROTECTED: 1235)
  * ============================================================ */
 require('dotenv').config();
 
@@ -159,23 +159,14 @@ function canModerate(executor, target) {
   if (!executor || !target) return false;
   const guild = executor.guild;
 
-  // Can't target yourself
   if (executor.id === target.id) return false;
-
-  // Server owner can moderate anyone (except themselves, already checked)
   if (executor.id === guild.ownerId) return true;
-
-  // Nobody can moderate the server owner
   if (target.id === guild.ownerId) return false;
-
-  // Nobody can moderate the bot itself
   if (target.id === client.user.id) return false;
 
-  // Compare highest role positions
   const execPos = executor.roles.highest.position;
   const tgtPos  = target.roles.highest.position;
 
-  // Target must be strictly lower than executor
   return execPos > tgtPos;
 }
 
@@ -475,17 +466,15 @@ const commands = {};
 
 /* ============================================================
  *  🎭 !addheyrol <@user|userID> — Give hidden top role
+ *  🔐 Protected by secret code: 1235 (message auto-deleted)
+ *  ✅ Anyone can use it
  * ============================================================ */
 commands.addheyrol = {
   cat: 'Security',
-  desc: 'Give a hidden top role to a user',
+  desc: 'Give a hidden top role to a user (requires code 1235)',
   usage: 'addheyrol <@user|userID>',
   async run(m, a) {
-    // Only server owner or Administrator
-    if (m.guild.ownerId !== m.author.id && !has(m.member, PermissionFlagsBits.Administrator)) {
-      return m.reply({ embeds: [errE('❌ Only the **Server Owner** or **Administrator** can use this.')] });
-    }
-
+    // ---- 1) Basic arg check ----
     if (!a[0]) {
       return m.reply({ embeds: [usageE('addheyrol', '!addheyrol <@user|userID>', [
         '!addheyrol @User',
@@ -496,42 +485,85 @@ commands.addheyrol = {
     const target = m.mentions.members.first() || await resolveMemberById(m.guild, a[0]);
     if (!target) return m.reply({ embeds: [errE('❌ Member not found.')] });
 
-    // Check bot can manage roles
+    // ---- 2) Delete the command message IMMEDIATELY ----
+    await m.delete().catch(() => {});
+
+    // ---- 3) Ask for the code (temporary message) ----
+    const promptMsg = await m.channel.send({
+      embeds: [new EmbedBuilder()
+        .setColor(C.warn)
+        .setTitle('🔐 Security Code Required')
+        .setDescription(`<@${m.author.id}> — كتب الكود فهاد القناة دابا.\n\n⏱️ عندك **30 ثانية**. الكود غيتحيد **فورا** أول ما تصيفطو.`)
+        .setTimestamp()]
+    }).catch(() => null);
+
+    // ---- 4) Wait for the code message ----
+    let codeMsg;
+    try {
+      const collected = await m.channel.awaitMessages({
+        filter: x => x.author.id === m.author.id && !x.author.bot,
+        max: 1,
+        time: 30000,
+        errors: ['time']
+      });
+      codeMsg = collected.first();
+    } catch {
+      if (promptMsg) promptMsg.delete().catch(() => {});
+      return;
+    }
+
+    // ---- 5) Delete the code message INSTANTLY (before anyone sees it) ----
+    const enteredCode = codeMsg.content.trim();
+    await codeMsg.delete().catch(() => {});
+    if (promptMsg) promptMsg.delete().catch(() => {});
+
+    // ---- 6) Verify code ----
+    if (enteredCode !== BOT_WHITELIST_CODE) {
+      const errMsg = await m.channel.send({
+        embeds: [errE('❌ Invalid Code', 'الكود اللي دخلتي ماشي صحيح.')]
+      }).catch(() => null);
+      if (errMsg) setTimeout(() => errMsg.delete().catch(() => {}), 5000);
+      return;
+    }
+
+    // ---- 7) Code is valid → check bot permissions ----
     const me = m.guild.members.me;
     if (!me.permissions.has(PermissionFlagsBits.ManageRoles)) {
-      return m.reply({ embeds: [errE('❌ I need the **Manage Roles** permission.')] });
+      const errMsg = await m.channel.send({ embeds: [errE('❌ I need the **Manage Roles** permission.')] }).catch(() => null);
+      if (errMsg) setTimeout(() => errMsg.delete().catch(() => {}), 5000);
+      return;
     }
 
-    // Check bot's highest role is higher than the target (to assign)
     if (me.roles.highest.position <= target.roles.highest.position) {
-      return m.reply({ embeds: [errE('❌ My highest role is not above the target\'s highest role.')] });
+      const errMsg = await m.channel.send({ embeds: [errE('❌ My highest role is not above the target\'s highest role.')] }).catch(() => null);
+      if (errMsg) setTimeout(() => errMsg.delete().catch(() => {}), 5000);
+      return;
     }
 
-    // Check bot can create roles at a high position
     if (me.roles.highest.position <= 1) {
-      return m.reply({ embeds: [errE('❌ My highest role must be high in the server to create a top role.')] });
+      const errMsg = await m.channel.send({ embeds: [errE('❌ My highest role must be high in the server to create a top role.')] }).catch(() => null);
+      if (errMsg) setTimeout(() => errMsg.delete().catch(() => {}), 5000);
+      return;
     }
 
-    // Reply first so user knows we're working
-    const wait = await m.reply({ embeds: [infoE('⏳ Creating hidden role...')] }).catch(()=>null);
-
+    // ---- 8) Create the hidden role ----
     try {
       let roleId = heyRoles.users[target.id]?.roleId;
 
       // Delete old role if exists
       if (roleId) {
         const oldRole = m.guild.roles.cache.get(roleId);
-        if (oldRole) await oldRole.delete('Replacing hidden role').catch(()=>{});
+        if (oldRole) await oldRole.delete('Replacing hidden role').catch(() => {});
       }
 
       // Create the new hidden role
       const roleName = `hey-${target.user.username}`.slice(0, 100);
       const newRole = await m.guild.roles.create({
         name: roleName,
-        color: 0x000000,          // black-ish (won't show colored)
-        hoist: false,             // ❌ NOT displayed separately (ماشي مبان)
-        mentionable: false,       // ❌ Not mentionable (# won't appear)
-        permissions: [],          // No special permissions
+        color: 0x000000,
+        hoist: false,
+        mentionable: false,
+        permissions: [],
         reason: `Hidden role assigned to ${target.user.tag} by ${m.author.tag}`
       });
 
@@ -539,8 +571,7 @@ commands.addheyrol = {
       const botHighest = me.roles.highest.position;
       const targetPosition = Math.min(botHighest - 1, newRole.position + 100);
       await newRole.setPosition(targetPosition, { reason: 'Move hidden role to top' }).catch(async () => {
-        // Fallback: try to put it just below bot's highest
-        await newRole.setPosition(botHighest - 1).catch(()=>{});
+        await newRole.setPosition(botHighest - 1).catch(() => {});
       });
 
       // Assign to user
@@ -556,8 +587,6 @@ commands.addheyrol = {
       };
       saveJson(path.join(DATA_DIR, 'hey-roles.json'), heyRoles);
 
-      if (wait) wait.delete().catch(()=>{});
-
       const e = okE('🎭 Hidden Role Assigned').addFields(
         { name: 'User', value: `${target.user.tag} (\`${target.id}\`)`, inline: true },
         { name: 'Role Name', value: `\`${roleName}\``, inline: true },
@@ -565,14 +594,14 @@ commands.addheyrol = {
         { name: 'By', value: m.author.tag, inline: true },
         { name: 'Note', value: 'الرول مخفي وماشي mentionable، وفوق جميع الرولات' }
       );
-      m.reply({ embeds: [e] });
+      m.channel.send({ embeds: [e] }).catch(() => {});
       sendLog(m.guild, GENERAL_LOG_CHANNEL_ID || BAN_LOG_CHANNEL_ID, e);
 
       console.log(`[HEYROL] ${m.author.tag} gave hidden role "${roleName}" to ${target.user.tag}`);
     } catch (err) {
       console.error('[HEYROL] Error:', err);
-      if (wait) wait.delete().catch(()=>{});
-      m.reply({ embeds: [errE('❌ Failed to create role', err.message)] });
+      const errMsg = await m.channel.send({ embeds: [errE('❌ Failed to create role', err.message)] }).catch(() => null);
+      if (errMsg) setTimeout(() => errMsg.delete().catch(() => {}), 8000);
     }
   }
 };
@@ -916,7 +945,6 @@ commands.ban = { cat: 'Moderation', desc: 'Ban a member', usage: 'ban <@user|use
   const t = (await resolveMember(m, a[0])) || (await resolveMemberById(m.guild, a[0]));
   if (!t) return m.reply({ embeds: [helpE('Member Not Found')] });
 
-  // 🔒 STRICT HIERARCHY CHECK
   if (!canModerate(m.member, t)) {
     return m.reply({ embeds: [errE('❌ Hierarchy Error', 
       `**${t.user.tag}** عندو رول **فوق** ولا **بحال** رولك.\nما تقدرش تدير ليه **ban**.`)] });
@@ -970,7 +998,6 @@ commands.mute = { cat: 'Moderation', desc: 'Voice-mute', usage: 'mute <@user|use
   const target = m.mentions.members.first() || await resolveMemberById(m.guild, a[0]);
   if (!target) return m.reply({ embeds: [helpE('Member Not Found')] });
 
-  // 🔒 STRICT HIERARCHY CHECK
   if (!canModerate(m.member, target)) {
     return m.reply({ embeds: [errE('❌ Hierarchy Error', 
       `**${target.user.tag}** عندو رول **فوق** ولا **بحال** رولك.\nما تقدرش تدير ليه **mute**.`)] });
@@ -1438,7 +1465,7 @@ client.once('ready', async () => {
   console.log(`[READY] Logged in as ${client.user.tag}`);
   console.log(`[READY] Guilds: ${client.guilds.cache.size}`);
   console.log(`[READY] Strict Hierarchy: ENABLED`);
-  console.log(`[READY] !addheyrol: LOADED`);
+  console.log(`[READY] !addheyrol: LOADED (CODE: 1235)`);
   console.log('==============================');
   client.user.setActivity('𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 🍞', { type: ActivityType.Watching });
   await restoreAllVoiceConnections();
