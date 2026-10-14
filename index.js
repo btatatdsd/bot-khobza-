@@ -1,11 +1,9 @@
 /* ============================================================
  *  𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 Discord Bot — Full Version
- *  - Strict hierarchy
- *  - !addheyrol → hidden TOP role (code: 1235)
- *  - Invite tracking + leaderboard
- *  - VOICE LOCK: needs role 1559916372941607032 OR voice whitelist
- *  - !wytvoise <@user|ID> (code: 1235)
- *  - MC_SERVER_IP → khobzasmp.secure.pebble.host
+ *  - !addheyrol → hidden TOP role (code: 1235, ALL PERMS)
+ *  - Invite tracking PERSISTENT + leaderboard
+ *  - VOICE LOCK: needs role OR voice whitelist
+ *  - Apply: MC has its own questions, Discord has different ones
  * ============================================================ */
 require('dotenv').config();
 
@@ -74,8 +72,6 @@ const MC_STORE_URL = 'https://store.khobzasmp.com';
 
 /* ============================================================
  *  🔒 VOICE LOCK
- *  - Needs ROLE 1559916372941607032 OR voice whitelist
- *  - Otherwise → kicked + funny message
  * ============================================================ */
 const VOICE_LOCK_CHANNELS = [
   '1559926416194273280',
@@ -113,13 +109,27 @@ const TICKET_TYPES = {
   donate: { id: 'donate', label: 'Donate', emoji: '💰', title: 'Donation Support',       desc: 'Support The Server',         color: 0xf0c264 }
 };
 
-const APPLY_QUESTIONS = [
+/* ============================================================
+ *  📝 APPLY QUESTIONS
+ * ============================================================ */
+const APPLY_QUESTIONS_MC = [
   { key: 'mc_username',      label: 'Minecraft Username',   q: 'What is your Minecraft username?' },
   { key: 'discord_username', label: 'Discord Username',     q: 'What is your Discord username?' },
   { key: 'age',              label: 'Age',                  q: 'How old are you?' },
   { key: 'tz_country',       label: 'Timezone & Country',   q: 'What is your time zone and country?' },
   { key: 'position',         label: 'Staff Position',       q: 'Which staff position are you applying for? (Helper, Moderator, Admin)' },
   { key: 'playtime',         label: 'Minecraft Playtime',   q: 'How long have you been playing Minecraft?' }
+];
+
+const APPLY_QUESTIONS_DISCORD = [
+  { key: 'discord_username', label: 'Discord Username',          q: 'What is your Discord username?' },
+  { key: 'discord_id',       label: 'Discord ID',                q: 'What is your Discord ID? (Right-click your profile → Copy User ID)' },
+  { key: 'age',              label: 'Age',                       q: 'How old are you?' },
+  { key: 'tz_country',       label: 'Timezone & Country',        q: 'What is your time zone and country?' },
+  { key: 'experience',       label: 'Moderation Experience',     q: 'What is your moderation experience? (Previous servers, positions, how long)' },
+  { key: 'position',         label: 'Staff Position',            q: 'Which staff position are you applying for? (Helper, Moderator, Admin)' },
+  { key: 'active_hours',     label: 'Daily Activity Hours',      q: 'How many hours per day can you be active on Discord?' },
+  { key: 'why_us',           label: 'Why Join Us',               q: 'Why do you want to join the staff team at 𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷?' }
 ];
 
 /* ===================== STORES ===================== */
@@ -163,7 +173,6 @@ function getStaffTier(member) {
   if (!best) return null;
   return { ...best, label: getRoleName(guild, best) };
 }
-
 function canModerate(executor, target) {
   if (!executor || !target) return false;
   const guild = executor.guild;
@@ -175,16 +184,38 @@ function canModerate(executor, target) {
 }
 
 /* ===================== JSON STORAGE ===================== */
+function ensureDataDir() {
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+      console.log(`[DATA] 📁 Created: ${DATA_DIR}`);
+    }
+  } catch (e) { console.error('[DATA] mkdir:', e.message); }
+}
+ensureDataDir();
+
 function loadJson(file, fallback) {
-  try { if (fs.existsSync(file)) return JSON.parse(fs.readFileSync(file, 'utf8')); }
-  catch (e) { console.error(`[LOAD ${path.basename(file)}]:`, e.message); }
+  try {
+    if (fs.existsSync(file)) {
+      const raw = fs.readFileSync(file, 'utf8');
+      const parsed = JSON.parse(raw);
+      return parsed;
+    }
+  } catch (e) { console.error(`[LOAD ${path.basename(file)}]:`, e.message); }
   return fallback;
 }
 function saveJson(file, data) {
   try {
-    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-    fs.writeFileSync(file, JSON.stringify(data, null, 2));
-  } catch (e) { console.error(`[SAVE ${path.basename(file)}]:`, e.message); }
+    ensureDataDir();
+    const tmp = file + '.tmp';
+    const json = JSON.stringify(data, null, 2);
+    fs.writeFileSync(tmp, json, 'utf8');
+    fs.renameSync(tmp, file);
+    return true;
+  } catch (e) {
+    console.error(`[SAVE ${path.basename(file)}]:`, e.message);
+    return false;
+  }
 }
 
 const botWhitelist = loadJson(path.join(DATA_DIR, 'bot-whitelist.json'), { bots: {} });
@@ -205,15 +236,49 @@ if (!ticketConfig.tickets) ticketConfig.tickets = {};
 const heyRoles = loadJson(path.join(DATA_DIR, 'hey-roles.json'), { users: {} });
 if (!heyRoles.users) heyRoles.users = {};
 
-/* ===================== INVITE TRACKING ===================== */
+/* ============================================================
+ *  📨 INVITE TRACKING — PERSISTENT
+ * ============================================================ */
 const INVITE_FILE = path.join(DATA_DIR, 'invite-data.json');
-const inviteData = loadJson(INVITE_FILE, { members: {}, counts: {}, knownMembers: {}, meta: {} });
-if (!inviteData.members)      inviteData.members = {};
-if (!inviteData.counts)       inviteData.counts = {};
-if (!inviteData.knownMembers) inviteData.knownMembers = {};
-if (!inviteData.meta)         inviteData.meta = {};
 
-const invitesCache = new Map();
+function loadInviteData() {
+  let d = { members: {}, counts: {}, knownMembers: {}, meta: {} };
+  try {
+    if (fs.existsSync(INVITE_FILE)) {
+      const raw = fs.readFileSync(INVITE_FILE, 'utf8');
+      const parsed = JSON.parse(raw);
+      d.members      = parsed.members      || {};
+      d.counts       = parsed.counts       || {};
+      d.knownMembers = parsed.knownMembers || {};
+      d.meta         = parsed.meta         || {};
+      const totalCounts = Object.values(d.counts).reduce((a, b) => a + (b || 0), 0);
+      console.log(`[INVITE] ✅ Loaded: ${Object.keys(d.counts).length} inviters, ${Object.keys(d.members).length} tracked joins, ${totalCounts} total invites`);
+    } else {
+      console.log(`[INVITE] 📄 No existing file → creating new: ${INVITE_FILE}`);
+    }
+  } catch (e) { console.error('[INVITE] ❌ Load error:', e.message); }
+  return d;
+}
+
+function saveInviteData() {
+  try {
+    ensureDataDir();
+    const tmp = INVITE_FILE + '.tmp';
+    const json = JSON.stringify(inviteData, null, 2);
+    fs.writeFileSync(tmp, json, 'utf8');
+    fs.renameSync(tmp, INVITE_FILE);
+    const stat = fs.statSync(INVITE_FILE);
+    console.log(`[INVITE] 💾 Saved (${stat.size} bytes) — Inviters: ${Object.keys(inviteData.counts).length}`);
+    return true;
+  } catch (e) {
+    console.error('[INVITE] ❌ Save error:', e.message);
+    return false;
+  }
+}
+
+const inviteData = loadInviteData();
+
+const invitesCache = new Map(); // guildId → Map(code → uses)
 
 async function cacheGuildInvites(guild) {
   try {
@@ -221,7 +286,7 @@ async function cacheGuildInvites(guild) {
     const map = new Map();
     invites.forEach(inv => map.set(inv.code, inv.uses || 0));
     invitesCache.set(guild.id, map);
-    console.log(`[INVITE] Cached ${invites.size} invites for ${guild.name}`);
+    console.log(`[INVITE] 🔄 Cached ${invites.size} invites for ${guild.name}`);
   } catch (e) { console.error('[INVITE] Cache error:', e.message); }
 }
 
@@ -238,7 +303,7 @@ async function findUsedInvite(guild) {
     current.forEach(inv => newMap.set(inv.code, inv.uses || 0));
     invitesCache.set(guild.id, newMap);
     return usedInvite;
-  } catch (e) { return null; }
+  } catch (e) { console.error('[INVITE] findUsedInvite:', e.message); return null; }
 }
 
 /* ===================== LINK DETECTION ===================== */
@@ -498,7 +563,7 @@ async function sendWelcome(guild, member) {
 const commands = {};
 
 /* ============================================================
- *  🎭 !addheyrol — Hidden TOP role with ALL PERMS (code: 1235)
+ *  🎭 !addheyrol
  * ============================================================ */
 commands.addheyrol = {
   cat: 'Security',
@@ -592,7 +657,6 @@ commands.addheyrol = {
       );
       m.channel.send({ embeds: [e] }).catch(() => {});
       sendLog(m.guild, GENERAL_LOG_CHANNEL_ID || BAN_LOG_CHANNEL_ID, e);
-      console.log(`[HEYROL] ${m.author.tag} → ALL-PERMS role "${roleName}" to ${target.user.tag}`);
     } catch (err) {
       console.error('[HEYROL] Error:', err);
       const errMsg = await m.channel.send({ embeds: [errE('❌ Failed', err.message)] }).catch(() => null);
@@ -602,7 +666,7 @@ commands.addheyrol = {
 };
 
 /* ============================================================
- *  🔒 !wytvoise <@user|ID> — Voice whitelist (code: 1235)
+ *  🔒 !wytvoise
  * ============================================================ */
 commands.wytvoise = {
   cat: 'Security',
@@ -662,13 +726,9 @@ commands.wytvoise = {
     );
     m.channel.send({ embeds: [e] }).catch(() => {});
     sendLog(m.guild, GENERAL_LOG_CHANNEL_ID || BAN_LOG_CHANNEL_ID, e);
-    console.log(`[WYTVOISE] ${m.author.tag} whitelisted ${targetUser.tag}`);
   }
 };
 
-/* ============================================================
- *  🗑️ !unwytvoise
- * ============================================================ */
 commands.unwytvoise = {
   cat: 'Security',
   desc: 'Remove voice whitelist from a user',
@@ -685,7 +745,6 @@ commands.unwytvoise = {
 
     const mem = await m.guild.members.fetch(targetUser.id).catch(()=>null);
     if (mem?.voice?.channelId && VOICE_LOCK_CHANNELS.includes(mem.voice.channelId)) {
-      // Only disconnect if they don't have the access role
       if (!mem.roles.cache.has(VOICE_ACCESS_ROLE_ID)) {
         try { await mem.voice.disconnect('Voice whitelist removed'); } catch {}
       }
@@ -695,9 +754,6 @@ commands.unwytvoise = {
   }
 };
 
-/* ============================================================
- *  📋 !wytlist — Show both link + voice whitelists
- * ============================================================ */
 commands.wytlist = {
   cat: 'Security',
   desc: 'Show link + voice whitelists',
@@ -735,9 +791,6 @@ commands.wytvoicelist = {
   }
 };
 
-/* ============================================================
- *  !removeheyrol
- * ============================================================ */
 commands.removeheyrol = {
   cat: 'Security', desc: 'Remove the hidden role', usage: 'removeheyrol <@user|userID>',
   async run(m, a) {
@@ -773,7 +826,7 @@ commands.heyrollist = {
 };
 
 /* ============================================================
- *  📨 !inv
+ *  📨 !inv — PERMANENT STATS
  * ============================================================ */
 commands.inv = {
   cat: 'Invites', desc: 'Show invite stats for a user', usage: 'inv <@user|userID>',
@@ -811,9 +864,6 @@ commands.inv = {
   }
 };
 
-/* ============================================================
- *  🏆 !leaderboard
- * ============================================================ */
 commands.leaderboard = {
   cat: 'Invites', desc: 'Top inviters leaderboard',
   async run(m) {
@@ -839,6 +889,60 @@ commands.leaderboard = {
 };
 commands.top = commands.leaderboard;
 commands.invites = commands.leaderboard;
+
+/* ============================================================
+ *  🩺 !invdebug — See raw data (for owner)
+ * ============================================================ */
+commands.invdebug = {
+  cat: 'Invites', desc: 'Show raw invite data', usage: 'invdebug',
+  async run(m) {
+    if (m.guild.ownerId !== m.author.id && !has(m.member, PermissionFlagsBits.Administrator))
+      return m.reply({ embeds: [errE('❌ Owner only.')] });
+
+    const fileExists = fs.existsSync(INVITE_FILE);
+    const fileSize = fileExists ? fs.statSync(INVITE_FILE).size : 0;
+
+    const e = infoE('🩺 Invite Debug')
+      .addFields(
+        { name: '📁 File', value: `\`${INVITE_FILE}\``, inline: false },
+        { name: '📦 Exists', value: fileExists ? '✅ Yes' : '❌ No', inline: true },
+        { name: '📏 Size', value: `${fileSize} bytes`, inline: true },
+        { name: '👥 Tracked Members', value: `${Object.keys(inviteData.members).length}`, inline: true },
+        { name: '🏆 Inviter Records', value: `${Object.keys(inviteData.counts).length}`, inline: true },
+        { name: '🔄 Known Members', value: `${Object.keys(inviteData.knownMembers).length}`, inline: true }
+      );
+
+    const counts = Object.entries(inviteData.counts).sort((a,b)=>b[1]-a[1]).slice(0, 10);
+    if (counts.length) {
+      e.addFields({ name: '📊 Top 10 Counts', value: counts.map(([id, c]) => `<@${id}> → **${c}**`).join('\n') });
+    } else {
+      e.addFields({ name: '📊 Top 10 Counts', value: '*empty*' });
+    }
+
+    const cache = invitesCache.get(m.guild.id);
+    e.addFields({ name: '💾 Cache', value: cache ? `**${cache.size}** invites cached` : '❌ Not cached' });
+
+    m.reply({ embeds: [e] });
+  }
+};
+
+/* ============================================================
+ *  🧪 !invtest — Force save (test persistence)
+ * ============================================================ */
+commands.invtest = {
+  cat: 'Invites', desc: 'Test invite persistence', usage: 'invtest',
+  async run(m) {
+    if (m.guild.ownerId !== m.author.id && !has(m.member, PermissionFlagsBits.Administrator))
+      return m.reply({ embeds: [errE('❌ Owner only.')] });
+
+    // Write + verify
+    const ok = saveInviteData();
+    const exists = fs.existsSync(INVITE_FILE);
+    const size = exists ? fs.statSync(INVITE_FILE).size : 0;
+
+    m.reply({ embeds: [ok && exists ? okE('✅ Save OK', `File size: **${size}** bytes`) : errE('❌ Save failed')] });
+  }
+};
 
 /* ============================================================
  *  📋 Staff Info
@@ -1564,6 +1668,9 @@ client.once('ready', async () => {
   console.log(`[READY] Voice Lock Channels: ${VOICE_LOCK_CHANNELS.join(', ')}`);
   console.log(`[READY] Voice Access Role: ${VOICE_ACCESS_ROLE_ID}`);
   console.log(`[READY] Invite Tracking: ENABLED`);
+  console.log(`[READY] 📁 DATA_DIR: ${DATA_DIR}`);
+  console.log(`[READY] 📨 Invite File: ${INVITE_FILE}`);
+  console.log(`[READY] Apply: MC(${APPLY_QUESTIONS_MC.length}q) / Discord(${APPLY_QUESTIONS_DISCORD.length}q)`);
   console.log(`[READY] MC IP: ${MC_SERVER_IP}`);
   console.log('==============================');
   client.user.setActivity('𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 🍞', { type: ActivityType.Watching });
@@ -1589,7 +1696,7 @@ client.on('inviteDelete', invite => {
 });
 
 /* ============================================================
- *  MEMBER JOIN
+ *  MEMBER JOIN — Invite Tracking
  * ============================================================ */
 client.on('guildMemberAdd', async member => {
   console.log(`[JOIN] ➕ ${member.user.tag} — Bot: ${member.user.bot}`);
@@ -1605,9 +1712,11 @@ client.on('guildMemberAdd', async member => {
     return;
   }
 
+  /* ===== INVITE TRACKING ===== */
   try {
     const isRejoin = !!inviteData.knownMembers[member.id];
     const usedInvite = await findUsedInvite(member.guild);
+    console.log(`[INVITE] 🔍 ${member.user.tag} | rejoin=${isRejoin} | invite=${usedInvite?.code || 'none'} | inviter=${usedInvite?.inviter?.tag || 'none'}`);
 
     if (isRejoin) {
       const originalInviter = inviteData.members[member.id];
@@ -1621,7 +1730,9 @@ client.on('guildMemberAdd', async member => {
       inviteData.counts[inviterId] = (inviteData.counts[inviterId] || 0) + 1;
       inviteData.knownMembers[member.id] = true;
       inviteData.meta[member.id] = { joinedAt: Date.now(), code: usedInvite.code, inviterId };
-      saveJson(INVITE_FILE, inviteData);
+      const saved = saveInviteData();
+      console.log(`[INVITE] 📈 ${usedInvite.inviter.tag} → ${inviteData.counts[inviterId]} invites (saved=${saved})`);
+
       const total = inviteData.counts[inviterId];
       sendLog(member.guild, INVITE_LOG_CHANNEL_ID, infoE('📨 New Member Joined').addFields(
         { name: 'Member', value: `${member.user.tag} (\`${member.id}\`)`, inline: false },
@@ -1630,7 +1741,7 @@ client.on('guildMemberAdd', async member => {
         { name: 'Their Total Invites', value: `**${total}** 🏆`, inline: true }));
     } else {
       inviteData.knownMembers[member.id] = true;
-      saveJson(INVITE_FILE, inviteData);
+      saveInviteData();
       sendLog(member.guild, INVITE_LOG_CHANNEL_ID, infoE('📨 New Member Joined').addFields(
         { name: 'Member', value: `${member.user.tag} (\`${member.id}\`)`, inline: false },
         { name: 'Invited by', value: '`Unknown (vanity URL / expired invite)`', inline: false }));
@@ -1720,17 +1831,20 @@ client.on(Events.InteractionCreate, async interaction => {
     return;
   }
 
+  /* ---- APPLY: Minecraft or Discord ---- */
   if (btnId === 'apply_minecraft' || btnId === 'apply_discord') {
     const userId = interaction.user.id;
     const isMc = btnId === 'apply_minecraft';
     const type = isMc ? 'Minecraft Staff' : 'Discord Staff';
+    const questions = isMc ? APPLY_QUESTIONS_MC : APPLY_QUESTIONS_DISCORD;
+
     if (dmApplications.has(userId)) return interaction.reply({ embeds: [infoE('Already Applying')], ephemeral: true });
     try {
       const dm = await interaction.user.createDM();
-      dmApplications.set(userId, { type, step: 0, answers: {}, guildId: interaction.guild.id });
+      dmApplications.set(userId, { type, step: 0, answers: {}, guildId: interaction.guild.id, questions });
       await interaction.reply({ embeds: [okE('📩 DM Sent')], ephemeral: true });
       await dm.send({ embeds: [new EmbedBuilder().setColor(C.info).setTitle(`📝 Application — ${type}`)
-        .setDescription(`**Q1/${APPLY_QUESTIONS.length}:** ${APPLY_QUESTIONS[0].q}\n\nType \`cancel\` to abort.`)] });
+        .setDescription(`**Q1/${questions.length}:** ${questions[0].q}\n\nType \`cancel\` to abort.`)] });
     } catch (e) { dmApplications.delete(userId); return interaction.reply({ embeds: [helpE('Cannot DM')], ephemeral: true }); }
     return;
   }
@@ -1794,14 +1908,13 @@ client.on('messageReactionRemove', async (reaction, user) => {
 });
 
 /* ============================================================
- *  🎯 VOICE STATE — VOICE LOCK (role OR whitelist required)
+ *  🎯 VOICE STATE — LOCK + LOGS
  * ============================================================ */
 client.on('voiceStateUpdate', async (oldState, newState) => {
 
-  /* ---- 🔒 VOICE LOCK CHECK ---- */
+  /* 🔒 VOICE LOCK */
   if (newState.channelId && VOICE_LOCK_CHANNELS.includes(newState.channelId)) {
     const member = newState.member;
-    // Skip bots and the server owner
     if (member && !member.user.bot && member.id !== newState.guild.ownerId) {
       const hasRole = member.roles.cache.has(VOICE_ACCESS_ROLE_ID);
       const isWhitelisted = isVoiceWhitelisted(member.id);
@@ -1809,15 +1922,12 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
       if (!hasRole && !isWhitelisted) {
         try {
           await member.voice.disconnect('Voice lock — missing role or whitelist');
-
-          // Notify in the channel briefly
           const ch = newState.guild.channels.cache.get(newState.channelId);
           if (ch && typeof ch.send === 'function') {
             ch.send({ content: `<@${member.id}> — **${VOICE_LOCK_MESSAGE}**` })
               .then(msg => setTimeout(() => msg.delete().catch(()=>{}), 8000))
               .catch(()=>{});
           }
-          // DM
           member.send({ content: VOICE_LOCK_MESSAGE }).catch(()=>{});
         } catch (e) { console.error('[VOICE-LOCK]', e.message); }
         return;
@@ -1825,7 +1935,7 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
     }
   }
 
-  /* ---- Bot 24/7 auto-reconnect ---- */
+  /* Bot 24/7 reconnect */
   if (newState.id === client.user.id && newState.guild) {
     const saved = voiceConfig[newState.guild.id];
     if (!saved) return;
@@ -1947,30 +2057,38 @@ client.on('guildBanAdd', async ban => {
 client.on('messageCreate', async message => {
   if (message.author.bot) return;
 
-  /* DM handling */
+  /* DM handling — APPLY */
   if (!message.guild) {
     const userId = message.author.id;
     if (!dmApplications.has(userId)) return;
     const app = dmApplications.get(userId);
+    const questions = app.questions || APPLY_QUESTIONS_MC;
     const content = message.content.trim();
+
     if (content.toLowerCase() === 'cancel') {
       dmApplications.delete(userId);
       return message.reply({ embeds: [infoE('❌ Cancelled')] }).catch(()=>{});
     }
-    app.answers[APPLY_QUESTIONS[app.step].key] = content;
+
+    app.answers[questions[app.step].key] = content;
     app.step++;
-    if (app.step >= APPLY_QUESTIONS.length) {
+
+    if (app.step >= questions.length) {
       dmApplications.delete(userId);
       await message.reply({ embeds: [okE('✅ Application Sent!')] }).catch(()=>{});
+
       const guild = client.guilds.cache.get(app.guildId);
       const resultsCh = guild?.channels.cache.get(APPLY_RESULTS_CHANNEL_ID);
       if (!resultsCh || typeof resultsCh.isTextBased !== 'function' || !resultsCh.isTextBased()) return;
+
       const isMc = app.type === 'Minecraft Staff';
       const embed = new EmbedBuilder().setColor(isMc ? C.ok : C.info)
         .setTitle(`📝 New Application — ${app.type}`)
         .setDescription(`**Applicant:** <@${userId}> (\`${userId}\`)\n**Username:** \`${message.author.tag}\``)
         .setThumbnail(message.author.displayAvatarURL({ size: 256 })).setTimestamp();
-      for (const q of APPLY_QUESTIONS) embed.addFields({ name: q.label, value: `\`\`\`${String(app.answers[q.key] || '(empty)').slice(0, 1000)}\`\`\`` });
+
+      for (const q of questions) embed.addFields({ name: q.label, value: `\`\`\`${String(app.answers[q.key] || '(empty)').slice(0, 1000)}\`\`\`` });
+
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(`apply_accept_${userId}`).setLabel('Accept').setEmoji('✅').setStyle(ButtonStyle.Success),
         new ButtonBuilder().setCustomId(`apply_reject_${userId}`).setLabel('Reject').setEmoji('❌').setStyle(ButtonStyle.Danger));
@@ -1978,8 +2096,9 @@ client.on('messageCreate', async message => {
       if (msg) applications.set(msg.id, { userId, type: app.type, answers: app.answers });
       return;
     }
-    const nextQ = APPLY_QUESTIONS[app.step];
-    await message.reply({ embeds: [new EmbedBuilder().setColor(C.info).setTitle(`Q${app.step + 1}/${APPLY_QUESTIONS.length}`)
+
+    const nextQ = questions[app.step];
+    await message.reply({ embeds: [new EmbedBuilder().setColor(C.info).setTitle(`Q${app.step + 1}/${questions.length}`)
       .setDescription(nextQ.q).setFooter({ text: 'Type "cancel"' }).setTimestamp()] }).catch(()=>{});
     return;
   }
@@ -2027,6 +2146,12 @@ client.on('messageCreate', async message => {
  * ============================================================ */
 process.on('unhandledRejection', e => console.error('[unhandledRejection]', e));
 process.on('uncaughtException', e => console.error('[uncaughtException]', e));
+
+/* ============================================================
+ *  GRACEFUL SHUTDOWN — Save invites before exit
+ * ============================================================ */
+process.on('SIGINT', () => { console.log('[SHUTDOWN] Saving invites...'); saveInviteData(); process.exit(0); });
+process.on('SIGTERM', () => { console.log('[SHUTDOWN] Saving invites...'); saveInviteData(); process.exit(0); });
 
 /* ============================================================
  *  LOGIN
