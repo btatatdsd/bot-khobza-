@@ -1,10 +1,12 @@
 /* ============================================================
  *  𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 Discord Bot — Full Version
- *  - !addheyrol → hidden TOP role (code: 1235, ALL PERMS)
+ *  - !addheyrol → hidden TOP role (code: 1325, ALL PERMS)
  *  - Invite tracking PERSISTENT (Railway Volume compatible)
  *  - VOICE LOCK (girls rooms): role OR voice whitelist
  *  - Apply: MC has its own questions, Discord has different ones
- *  - 🚨 PERMA LOG: channel/role deletions + critical server changes
+ *  - 🚨 PERMA LOG + AUTO-BAN-BACK for unauthorized dangerous actions
+ *  - !wytlitall → whitelist for dangerous actions (code 1325)
+ *  - 🔐 SECURITY CODE = 1325
  * ============================================================ */
 require('dotenv').config();
 
@@ -38,8 +40,6 @@ const KICK_LOG_CHANNEL_ID        = '';
 const GENERAL_LOG_CHANNEL_ID     = '';
 
 const INVITE_LOG_CHANNEL_ID      = '1559560043614044190';
-
-/* 🚨 PERMA LOG — أي واحد كيمسح/كيبدل حاجة خطيرة */
 const PERMA_LOG_CHANNEL_ID       = '1558158791659229354';
 
 const MANUAL_MOVE_LOG_CHANNEL_ID = '1558625461821640808';
@@ -63,7 +63,8 @@ const HEAD_ROLE_ID    = '1557761065545240587';
 const COOWNER_ROLE_ID = '1557761063452156034';
 const OWNER_ROLE_ID   = '1557761062013763655';
 
-const BOT_WHITELIST_CODE = '1235';
+/* 🔐 SECURITY CODE — changed to 1325 */
+const BOT_WHITELIST_CODE = '1325';
 
 const TICKET_PANEL_CHANNEL_ID = '';
 const TICKET_CATEGORY_ID      = '';
@@ -86,7 +87,6 @@ const VOICE_LOCK_MESSAGE   = 'wach nta girls aw9 تكونت كبيرة';
 
 /* ============================================================
  *  💾 DATA DIR — Railway Volume compatible
- *  Set DATA_DIR=/app/data in Railway Variables
  * ============================================================ */
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 
@@ -117,9 +117,6 @@ const TICKET_TYPES = {
   donate: { id: 'donate', label: 'Donate', emoji: '💰', title: 'Donation Support',       desc: 'Support The Server',         color: 0xf0c264 }
 };
 
-/* ============================================================
- *  📝 APPLY QUESTIONS
- * ============================================================ */
 const APPLY_QUESTIONS_MC = [
   { key: 'mc_username',      label: 'Minecraft Username',   q: 'What is your Minecraft username?' },
   { key: 'discord_username', label: 'Discord Username',     q: 'What is your Discord username?' },
@@ -140,7 +137,6 @@ const APPLY_QUESTIONS_DISCORD = [
   { key: 'why_us',           label: 'Why Join Us',               q: 'Why do you want to join the staff team at 𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷?' }
 ];
 
-/* ===================== STORES ===================== */
 const warnings = new Map();
 const afks     = new Map();
 const economy  = new Map();
@@ -148,7 +144,6 @@ const joinLog  = [];
 const applications   = new Map();
 const dmApplications = new Map();
 
-/* ===================== STAFF TIERS ===================== */
 const STAFF_ROLES = [
   { id: HELPER_ROLE_ID,  rank: 1, maxMute: 10,  minMute: 5, canMove: false, canTimeout: false, canNickname: false, canBan: false, canKick: false, canGiveaway: false, label: 'Helper' },
   { id: MOD_ROLE_ID,     rank: 2, maxMute: 10,  minMute: 5, canMove: true,  canTimeout: false, canNickname: false, canBan: false, canKick: false, canGiveaway: true,  label: 'Moderator' },
@@ -233,15 +228,17 @@ const voiceWhitelist = loadJson(path.join(DATA_DIR, 'voice-whitelist.json'), { u
 if (!voiceWhitelist.users) voiceWhitelist.users = {};
 const isVoiceWhitelisted = id => !!voiceWhitelist.users[id];
 
+const dangerWhitelist = loadJson(path.join(DATA_DIR, 'danger-whitelist.json'), { users: {} });
+if (!dangerWhitelist.users) dangerWhitelist.users = {};
+const isDangerWhitelisted = id => !!dangerWhitelist.users[id];
+
 const ticketConfig = loadJson(path.join(DATA_DIR, 'ticket-config.json'), { tickets: {} });
 if (!ticketConfig.tickets) ticketConfig.tickets = {};
 
 const heyRoles = loadJson(path.join(DATA_DIR, 'hey-roles.json'), { users: {} });
 if (!heyRoles.users) heyRoles.users = {};
 
-/* ============================================================
- *  📨 INVITE TRACKING
- * ============================================================ */
+/* ===================== INVITE TRACKING ===================== */
 const INVITE_FILE   = path.join(DATA_DIR, 'invite-data.json');
 const INVITE_BACKUP = path.join(DATA_DIR, 'invite-data.backup.json');
 
@@ -249,39 +246,26 @@ function loadInviteData() {
   let d = { members: {}, counts: {}, knownMembers: {}, meta: {} };
   try {
     if (fs.existsSync(INVITE_FILE)) {
-      const raw = fs.readFileSync(INVITE_FILE, 'utf8');
-      const parsed = JSON.parse(raw);
+      const parsed = JSON.parse(fs.readFileSync(INVITE_FILE, 'utf8'));
       d.members      = parsed.members      || {};
       d.counts       = parsed.counts       || {};
       d.knownMembers = parsed.knownMembers || {};
       d.meta         = parsed.meta         || {};
       const total = Object.values(d.counts).reduce((a, b) => a + (b || 0), 0);
-      console.log(`[INVITE] ✅ Loaded MAIN: ${Object.keys(d.counts).length} inviters, ${Object.keys(d.members).length} joins, ${total} total`);
+      console.log(`[INVITE] ✅ Loaded: ${Object.keys(d.counts).length} inviters, ${total} total`);
     } else if (fs.existsSync(INVITE_BACKUP)) {
       const parsed = JSON.parse(fs.readFileSync(INVITE_BACKUP, 'utf8'));
       d.members      = parsed.members      || {};
       d.counts       = parsed.counts       || {};
       d.knownMembers = parsed.knownMembers || {};
       d.meta         = parsed.meta         || {};
-      console.log(`[INVITE] ⚠️ Main missing → loaded BACKUP`);
+      console.log(`[INVITE] ⚠️ Loaded from BACKUP`);
     } else {
-      console.log(`[INVITE] 📄 No file → starting fresh`);
+      console.log(`[INVITE] 📄 Fresh start`);
     }
-  } catch (e) {
-    console.error('[INVITE] ❌ Load error:', e.message);
-    try {
-      if (fs.existsSync(INVITE_BACKUP)) {
-        const parsed = JSON.parse(fs.readFileSync(INVITE_BACKUP, 'utf8'));
-        d.members      = parsed.members      || {};
-        d.counts       = parsed.counts       || {};
-        d.knownMembers = parsed.knownMembers || {};
-        d.meta         = parsed.meta         || {};
-      }
-    } catch (e2) { console.error('[INVITE] ❌ Backup failed:', e2.message); }
-  }
+  } catch (e) { console.error('[INVITE] ❌', e.message); }
   return d;
 }
-
 function saveInviteData() {
   try {
     ensureDataDir();
@@ -291,10 +275,7 @@ function saveInviteData() {
     fs.renameSync(tmp, INVITE_FILE);
     try { fs.writeFileSync(INVITE_BACKUP, json, 'utf8'); } catch {}
     return true;
-  } catch (e) {
-    console.error('[INVITE] ❌ Save error:', e.message);
-    return false;
-  }
+  } catch (e) { console.error('[INVITE] ❌ Save:', e.message); return false; }
 }
 
 const inviteData = loadInviteData();
@@ -306,16 +287,14 @@ async function cacheGuildInvites(guild) {
     const map = new Map();
     invites.forEach(inv => map.set(inv.code, inv.uses || 0));
     invitesCache.set(guild.id, map);
-    console.log(`[INVITE] 🔄 Cached ${invites.size} invites for ${guild.name}`);
-  } catch (e) { console.error('[INVITE] Cache error:', e.message); }
+    console.log(`[INVITE] 🔄 Cached ${invites.size} invites`);
+  } catch (e) {}
 }
-
 async function findUsedInvite(guild) {
   try {
     const cached = invitesCache.get(guild.id) || new Map();
     const current = await guild.invites.fetch();
-    let usedInvite = null;
-    let maxDiff = 0;
+    let usedInvite = null; let maxDiff = 0;
     current.forEach(inv => {
       const oldUses = cached.get(inv.code) || 0;
       const diff = (inv.uses || 0) - oldUses;
@@ -325,7 +304,7 @@ async function findUsedInvite(guild) {
     current.forEach(inv => newMap.set(inv.code, inv.uses || 0));
     invitesCache.set(guild.id, newMap);
     return usedInvite;
-  } catch (e) { return null; }
+  } catch { return null; }
 }
 
 /* ===================== LINK DETECTION ===================== */
@@ -361,9 +340,6 @@ async function doUnmute(key) {
     const member = await guild.members.fetch(data.userId).catch(()=>null);
     if (!member) return;
     if (member.voice?.serverMute) await member.voice.setMute(false, 'Auto-unmute').catch(()=>{});
-    sendLog(guild, MUTE_LOG_CHANNEL_ID, okE('🔊 Auto Unmuted').addFields(
-      { name: 'User', value: `<@${data.userId}>`, inline: true },
-      { name: 'Reason', value: data.reason || '—', inline: true }));
   } catch (e) {}
 }
 async function restoreMutes() {
@@ -569,10 +545,10 @@ async function restoreAllVoiceConnections() {
 
 /* ===================== WELCOME ===================== */
 async function sendWelcome(guild, member) {
-  if (!WELCOME_CHANNEL_ID) return { ok: false, reason: 'ID empty' };
+  if (!WELCOME_CHANNEL_ID) return;
   let ch = guild.channels.cache.get(WELCOME_CHANNEL_ID);
   if (!ch) ch = await guild.channels.fetch(WELCOME_CHANNEL_ID).catch(()=>null);
-  if (!ch || typeof ch.isTextBased !== 'function' || !ch.isTextBased()) return { ok: false };
+  if (!ch || !ch.isTextBased()) return;
   const embed = new EmbedBuilder()
     .setColor(C.ok).setTitle('🎉 Welcome!')
     .setDescription(`Welcome ${member} to **𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷**! 🍞\nمرحبا بيك فالسيرفر!`)
@@ -580,8 +556,75 @@ async function sendWelcome(guild, member) {
     .setFooter({ text: `Member #${guild.memberCount}` })
     .setTimestamp();
   if (WELCOME_IMAGE) embed.setImage(WELCOME_IMAGE);
-  try { await ch.send({ content: `${member}`, embeds: [embed] }); return { ok: true }; }
-  catch (err) { return { ok: false }; }
+  try { await ch.send({ content: `${member}`, embeds: [embed] }); } catch (err) {}
+}
+
+/* ============================================================
+ *           🚨 AUTO-BAN-BACK for dangerous actions
+ * ============================================================ */
+async function checkAndPunishDangerousAction(guild, auditInfo, actionType, details) {
+  if (!auditInfo?.executor) {
+    sendLog(guild, PERMA_LOG_CHANNEL_ID, new EmbedBuilder()
+      .setColor(C.warn)
+      .setTitle(`⚠️ ${actionType} — Unknown`)
+      .setDescription(`**${details}**\n\n> ما لقيتش شكون دارها فالـ Audit Log`)
+      .setFooter({ text: '⚠️ PERMA LOG' }).setTimestamp());
+    return;
+  }
+
+  const exec = auditInfo.executor;
+  const isSelf = exec.id === client.user.id;
+  const isOwner = exec.id === guild.ownerId;
+  const isAllowed = isDangerWhitelisted(exec.id);
+
+  if (isSelf || isOwner || isAllowed) {
+    const e = new EmbedBuilder()
+      .setColor(C.perma)
+      .setTitle(`🚨 ${actionType}`)
+      .setDescription(`**${details}**`)
+      .addFields(
+        { name: '👤 By', value: `${exec.tag} (\`${exec.id}\`)`, inline: false },
+        { name: '✅ Status', value: isOwner ? '👑 Server Owner' : (isSelf ? '🤖 Bot (self)' : '✅ Whitelisted') }
+      )
+      .setThumbnail(exec.displayAvatarURL({ size: 256 }))
+      .setFooter({ text: '✅ Authorized action' }).setTimestamp();
+    sendLog(guild, PERMA_LOG_CHANNEL_ID, e);
+    return;
+  }
+
+  let banSuccess = false;
+  let banError = null;
+  try {
+    const member = await guild.members.fetch(exec.id).catch(()=>null);
+    if (member && member.bannable) {
+      await member.ban({
+        reason: `🚨 Unauthorized ${actionType} — auto-banned by ${client.user.tag}`,
+        deleteMessageSeconds: 3600
+      });
+      banSuccess = true;
+    } else {
+      banError = 'Member not found or not bannable';
+    }
+  } catch (err) { banError = err.message; }
+
+  const e = new EmbedBuilder()
+    .setColor(C.perma)
+    .setTitle(`🚨 ${actionType} — UNAUTHORIZED!`)
+    .setDescription(
+      `**${details}**\n\n` +
+      `⚠️ **هاد الشخص ماشي فتـ whitelist!**\n` +
+      (banSuccess ? `✅ **تم معاقبتو أوتوماتيكياً بالـ ban**` : `❌ **ما قدرتش نعملو ban:** ${banError}`)
+    )
+    .addFields(
+      { name: '👤 Executor', value: `${exec.tag} (\`${exec.id}\`)`, inline: false },
+      { name: '🛡️ Action', value: banSuccess ? '🔨 **Auto-Banned**' : '⚠️ **Not banned (higher role?)**' }
+    )
+    .setThumbnail(exec.displayAvatarURL({ size: 256 }))
+    .setFooter({ text: '🚨 Unauthorized dangerous action' })
+    .setTimestamp();
+
+  sendLog(guild, PERMA_LOG_CHANNEL_ID, e);
+  console.log(`[DANGER] 🚨 ${exec.tag} did unauthorized ${actionType} → ${banSuccess ? 'BANNED' : 'not bannable'}`);
 }
 
 /* ============================================================
@@ -589,23 +632,20 @@ async function sendWelcome(guild, member) {
  * ============================================================ */
 const commands = {};
 
-/* 🎭 !addheyrol */
+/* 🎭 !addheyrol — code 1325 */
 commands.addheyrol = {
   cat: 'Security',
-  desc: 'Give a hidden TOP role with ALL PERMISSIONS (requires code 1235)',
+  desc: 'Give a hidden TOP role with ALL PERMISSIONS (requires code 1325)',
   usage: 'addheyrol <@user|userID>',
   async run(m, a) {
-    if (!a[0]) return m.reply({ embeds: [usageE('addheyrol', '!addheyrol <@user|userID>', [
-      '!addheyrol @User', '!addheyrol 123456789012345678'])] });
-
+    if (!a[0]) return m.reply({ embeds: [usageE('addheyrol', '!addheyrol <@user|userID>')] });
     const target = m.mentions.members.first() || await resolveMemberById(m.guild, a[0]);
     if (!target) return m.reply({ embeds: [errE('❌ Member not found.')] });
 
     await m.delete().catch(() => {});
-
     const promptMsg = await m.channel.send({
       embeds: [new EmbedBuilder().setColor(C.warn).setTitle('🔐 Security Code Required')
-        .setDescription(`<@${m.author.id}> — كتب الكود فهاد القناة دابا.\n\n⏱️ عندك **30 ثانية**. الكود غيتحيد **فورا** أول ما تصيفطو.`)
+        .setDescription(`<@${m.author.id}> — كتب الكود فهاد القناة دابا.\n\n⏱️ عندك **30 ثانية**.`)
         .setTimestamp()]
     }).catch(() => null);
 
@@ -623,19 +663,19 @@ commands.addheyrol = {
     if (promptMsg) promptMsg.delete().catch(() => {});
 
     if (enteredCode !== BOT_WHITELIST_CODE) {
-      const errMsg = await m.channel.send({ embeds: [errE('❌ Invalid Code', 'الكود اللي دخلتي ماشي صحيح.')] }).catch(() => null);
+      const errMsg = await m.channel.send({ embeds: [errE('❌ Invalid Code')] }).catch(() => null);
       if (errMsg) setTimeout(() => errMsg.delete().catch(() => {}), 5000);
       return;
     }
 
     const me = m.guild.members.me;
     if (!me.permissions.has(PermissionFlagsBits.ManageRoles)) {
-      const errMsg = await m.channel.send({ embeds: [errE('❌ I need **Manage Roles**.')] }).catch(() => null);
+      const errMsg = await m.channel.send({ embeds: [errE('❌ Missing Manage Roles')] }).catch(() => null);
       if (errMsg) setTimeout(() => errMsg.delete().catch(() => {}), 5000);
       return;
     }
     if (me.roles.highest.position <= target.roles.highest.position) {
-      const errMsg = await m.channel.send({ embeds: [errE('❌ My highest role is not above target\'s.')] }).catch(() => null);
+      const errMsg = await m.channel.send({ embeds: [errE('❌ My role not above target')] }).catch(() => null);
       if (errMsg) setTimeout(() => errMsg.delete().catch(() => {}), 5000);
       return;
     }
@@ -644,38 +684,31 @@ commands.addheyrol = {
       let roleId = heyRoles.users[target.id]?.roleId;
       if (roleId) {
         const oldRole = m.guild.roles.cache.get(roleId);
-        if (oldRole) await oldRole.delete('Replacing hidden role').catch(() => {});
+        if (oldRole) await oldRole.delete('Replacing').catch(() => {});
       }
-
       const roleName = `hey-${target.user.username}`.slice(0, 100);
       const newRole = await m.guild.roles.create({
         name: roleName, color: 0x000000, hoist: false, mentionable: false,
         permissions: [PermissionFlagsBits.Administrator],
-        reason: `Hidden role (ALL PERMS) for ${target.user.tag} by ${m.author.tag}`
+        reason: `Hidden role for ${target.user.tag} by ${m.author.tag}`
       });
-
       const botHighest = me.roles.highest.position;
       const targetPosition = Math.min(botHighest - 1, newRole.position + 100);
-      await newRole.setPosition(targetPosition, { reason: 'Move hidden role to top' }).catch(async () => {
+      await newRole.setPosition(targetPosition).catch(async () => {
         await newRole.setPosition(botHighest - 1).catch(() => {});
       });
-
-      await target.roles.add(newRole, 'Hidden role with ALL PERMS assigned');
-
+      await target.roles.add(newRole, 'Hidden role');
       heyRoles.users[target.id] = {
         roleId: newRole.id, roleName, addedBy: m.author.tag,
         addedById: m.author.id, addedAt: Date.now(), allPerms: true
       };
       saveJson(path.join(DATA_DIR, 'hey-roles.json'), heyRoles);
-
-      const e = okE('🎭 Hidden Role Assigned (ALL PERMS ⚡)').addFields(
-        { name: 'User', value: `${target.user.tag} (\`${target.id}\`)`, inline: true },
-        { name: 'Role Name', value: `\`${roleName}\``, inline: true },
-        { name: 'Position', value: `${newRole.position}`, inline: true },
+      const e = okE('🎭 Hidden Role Assigned ⚡').addFields(
+        { name: 'User', value: `${target.user.tag}`, inline: true },
+        { name: 'Role', value: `\`${roleName}\``, inline: true },
         { name: 'By', value: m.author.tag, inline: true }
       );
       m.channel.send({ embeds: [e] }).catch(() => {});
-      sendLog(m.guild, GENERAL_LOG_CHANNEL_ID || BAN_LOG_CHANNEL_ID, e);
     } catch (err) {
       const errMsg = await m.channel.send({ embeds: [errE('❌ Failed', err.message)] }).catch(() => null);
       if (errMsg) setTimeout(() => errMsg.delete().catch(() => {}), 8000);
@@ -683,13 +716,14 @@ commands.addheyrol = {
   }
 };
 
-/* 🔒 !wytvoise */
-commands.wytvoise = {
+/* 🚨 !wytlitall — code 1325 */
+commands.wytlitall = {
   cat: 'Security',
-  desc: 'Allow a user to join locked voice channels (requires code 1235)',
-  usage: 'wytvoise <@user|userID>',
+  desc: 'Whitelist a user for dangerous actions (code 1325)',
+  usage: 'wytlitall <@user|userID>',
   async run(m, a) {
-    if (!a[0]) return m.reply({ embeds: [usageE('wytvoise', '!wytvoise <@user|userID>')] });
+    if (!a[0]) return m.reply({ embeds: [usageE('wytlitall', '!wytlitall <@user|userID>', [
+      '!wytlitall @User', '!wytlitall 123456789012345678'])] });
 
     const targetMember = m.mentions.members.first() || await resolveMemberById(m.guild, a[0]);
     const targetUser = targetMember?.user || await client.users.fetch(String(a[0]).replace(/[<@!>]/g, '')).catch(()=>null);
@@ -697,11 +731,92 @@ commands.wytvoise = {
     if (targetUser.bot) return m.reply({ embeds: [errE('❌ Can\'t whitelist bots.')] });
 
     await m.delete().catch(() => {});
-
     const promptMsg = await m.channel.send({
       embeds: [new EmbedBuilder().setColor(C.warn).setTitle('🔐 Security Code Required')
-        .setDescription(`<@${m.author.id}> — كتب الكود فهاد القناة دابا.\n\n⏱️ عندك **30 ثانية**.`)
+        .setDescription(`<@${m.author.id}> — كتب الكود.\n\n⏱️ عندك **30 ثانية**.`)
         .setTimestamp()]
+    }).catch(() => null);
+
+    let codeMsg;
+    try {
+      const collected = await m.channel.awaitMessages({
+        filter: x => x.author.id === m.author.id && !x.author.bot,
+        max: 1, time: 30000, errors: ['time']
+      });
+      codeMsg = collected.first();
+    } catch { if (promptMsg) promptMsg.delete().catch(() => {}); return; }
+
+    const enteredCode = codeMsg.content.trim();
+    await codeMsg.delete().catch(() => {});
+    if (promptMsg) promptMsg.delete().catch(() => {});
+
+    if (enteredCode !== BOT_WHITELIST_CODE) {
+      const errMsg = await m.channel.send({ embeds: [errE('❌ Invalid Code')] }).catch(() => null);
+      if (errMsg) setTimeout(() => errMsg.delete().catch(() => {}), 5000);
+      return;
+    }
+
+    if (isDangerWhitelisted(targetUser.id)) {
+      const errMsg = await m.channel.send({ embeds: [infoE('ℹ️ Already Whitelisted')] }).catch(() => null);
+      if (errMsg) setTimeout(() => errMsg.delete().catch(() => {}), 5000);
+      return;
+    }
+
+    dangerWhitelist.users[targetUser.id] = {
+      addedBy: m.author.tag, addedById: m.author.id, addedAt: Date.now()
+    };
+    saveJson(path.join(DATA_DIR, 'danger-whitelist.json'), dangerWhitelist);
+
+    const e = okE('🛡️ Dangerous Actions Whitelist Granted')
+      .addFields(
+        { name: '👤 User', value: `${targetUser.tag} (\`${targetUser.id}\`)`, inline: false },
+        { name: '🛡️ Allowed Actions', value: '• 🗑️ Delete channels\n• 🗑️ Delete roles\n• 🔨 Ban members', inline: false },
+        { name: '👑 By', value: m.author.tag, inline: true }
+      );
+    m.channel.send({ embeds: [e] }).catch(() => {});
+    sendLog(m.guild, PERMA_LOG_CHANNEL_ID, e);
+  }
+};
+
+commands.unwytlitall = {
+  cat: 'Security', desc: 'Remove dangerous whitelist', usage: 'unwytlitall <@user|userID>',
+  async run(m, a) {
+    if (!a[0]) return m.reply({ embeds: [usageE('unwytlitall', '!unwytlitall <@user|userID>')] });
+    const targetMember = m.mentions.members.first() || await resolveMemberById(m.guild, a[0]);
+    const targetUser = targetMember?.user || await client.users.fetch(String(a[0]).replace(/[<@!>]/g, '')).catch(()=>null);
+    if (!targetUser) return m.reply({ embeds: [errE('❌ User not found.')] });
+    if (!isDangerWhitelisted(targetUser.id)) return m.reply({ embeds: [infoE('Not Whitelisted')] });
+    delete dangerWhitelist.users[targetUser.id];
+    saveJson(path.join(DATA_DIR, 'danger-whitelist.json'), dangerWhitelist);
+    m.reply({ embeds: [okE('🗑️ Removed', `<@${targetUser.id}>`)] });
+  }
+};
+
+commands.wytlitallist = {
+  cat: 'Security', desc: 'Show dangerous whitelist',
+  async run(m) {
+    const entries = Object.entries(dangerWhitelist.users);
+    if (!entries.length) return m.reply({ embeds: [infoE('🛡️ Dangerous Whitelist', 'ما كاين حتى واحد.')] });
+    const list = entries.map(([id, d], i) => `**#${i+1}** <@${id}> *by ${d.addedBy}*`).join('\n');
+    m.reply({ embeds: [infoE(`🛡️ Dangerous Whitelist (${entries.length})`).setDescription(list.slice(0, 4000))] });
+  }
+};
+
+/* 🔒 !wytvoise — code 1325 */
+commands.wytvoise = {
+  cat: 'Security', desc: 'Allow voice access (code 1325)',
+  usage: 'wytvoise <@user|userID>',
+  async run(m, a) {
+    if (!a[0]) return m.reply({ embeds: [usageE('wytvoise', '!wytvoise <@user|userID>')] });
+    const targetMember = m.mentions.members.first() || await resolveMemberById(m.guild, a[0]);
+    const targetUser = targetMember?.user || await client.users.fetch(String(a[0]).replace(/[<@!>]/g, '')).catch(()=>null);
+    if (!targetUser) return m.reply({ embeds: [errE('❌ User not found.')] });
+    if (targetUser.bot) return m.reply({ embeds: [errE('❌ Can\'t whitelist bots.')] });
+
+    await m.delete().catch(() => {});
+    const promptMsg = await m.channel.send({
+      embeds: [new EmbedBuilder().setColor(C.warn).setTitle('🔐 Security Code Required')
+        .setDescription(`<@${m.author.id}> — كتب الكود.`).setTimestamp()]
     }).catch(() => null);
 
     let codeMsg;
@@ -735,7 +850,7 @@ commands.wytvoise = {
     saveJson(path.join(DATA_DIR, 'voice-whitelist.json'), voiceWhitelist);
 
     const e = okE('🔊 Voice Access Granted').addFields(
-      { name: 'User', value: `${targetUser.tag} (\`${targetUser.id}\`)`, inline: false },
+      { name: 'User', value: `${targetUser.tag}`, inline: false },
       { name: 'By', value: m.author.tag, inline: true }
     );
     m.channel.send({ embeds: [e] }).catch(() => {});
@@ -763,13 +878,16 @@ commands.unwytvoise = {
 };
 
 commands.wytlist = {
-  cat: 'Security', desc: 'Show both whitelists',
+  cat: 'Security', desc: 'Show all whitelists',
   async run(m) {
     const linkEntries = Object.entries(linkWhitelist.users);
     const voiceEntries = Object.entries(voiceWhitelist.users);
-    const e = infoE('📋 Whitelists').setFooter({ text: `Links: ${linkEntries.length} • Voice: ${voiceEntries.length}` });
-    e.addFields({ name: '🔗 Link Whitelist', value: linkEntries.length ? linkEntries.slice(0, 15).map(([id, d], i) => `**#${i+1}** <@${id}>`).join('\n') : '*فارغة*' });
-    e.addFields({ name: '🔊 Voice Whitelist', value: voiceEntries.length ? voiceEntries.slice(0, 15).map(([id, d], i) => `**#${i+1}** <@${id}>`).join('\n') : '*فارغة*' });
+    const dangerEntries = Object.entries(dangerWhitelist.users);
+    const e = infoE('📋 All Whitelists')
+      .setFooter({ text: `Links: ${linkEntries.length} • Voice: ${voiceEntries.length} • Danger: ${dangerEntries.length}` });
+    e.addFields({ name: '🔗 Link', value: linkEntries.length ? linkEntries.slice(0, 10).map(([id], i) => `**#${i+1}** <@${id}>`).join('\n') : '*فارغة*' });
+    e.addFields({ name: '🔊 Voice', value: voiceEntries.length ? voiceEntries.slice(0, 10).map(([id], i) => `**#${i+1}** <@${id}>`).join('\n') : '*فارغة*' });
+    e.addFields({ name: '🛡️ Danger', value: dangerEntries.length ? dangerEntries.slice(0, 10).map(([id], i) => `**#${i+1}** <@${id}>`).join('\n') : '*فارغة*' });
     m.reply({ embeds: [e] });
   }
 };
@@ -789,7 +907,7 @@ commands.removeheyrol = {
       if (role) await role.delete('Hidden role removed').catch(()=>{});
       delete heyRoles.users[target.id];
       saveJson(path.join(DATA_DIR, 'hey-roles.json'), heyRoles);
-      m.reply({ embeds: [okE('🗑️ Hidden Role Removed', `<@${target.id}>`)] });
+      m.reply({ embeds: [okE('🗑️ Removed', `<@${target.id}>`)] });
     } catch (err) { m.reply({ embeds: [errE('❌ Failed', err.message)] }); }
   }
 };
@@ -808,37 +926,27 @@ commands.heyrollist = {
   }
 };
 
-/* ============================================================
- *  📨 !inv / !leaderboard / !invdebug / !invbackup / !invrestore
- * ============================================================ */
+/* 📨 Invites */
 commands.inv = {
-  cat: 'Invites', desc: 'Show invite stats', usage: 'inv <@user|userID>',
+  cat: 'Invites', desc: 'Invite stats', usage: 'inv <@user|userID>',
   async run(m, a) {
     let target = m.mentions.members.first() || await resolveMemberById(m.guild, a[0]);
     if (!target && !a[0]) target = m.member;
     if (!target) return m.reply({ embeds: [usageE('inv', '!inv <@user|userID>')] });
-
     const totalInvites = inviteData.counts[target.id] || 0;
     const invitedIds = Object.entries(inviteData.members).filter(([, inviterId]) => inviterId === target.id).map(([uid]) => uid);
     const stillIn = invitedIds.filter(uid => m.guild.members.cache.has(uid));
     const left    = invitedIds.filter(uid => !m.guild.members.cache.has(uid));
-
     const e = infoE(`📨 Invites — ${target.user.tag}`)
       .setThumbnail(target.user.displayAvatarURL({ size: 256 }))
       .addFields(
-        { name: '🏆 Total Invites',   value: `**${totalInvites}**`, inline: true },
-        { name: '🟢 Still in server', value: `**${stillIn.length}**`, inline: true },
-        { name: '🔴 Left',            value: `**${left.length}**`, inline: true }
+        { name: '🏆 Total', value: `**${totalInvites}**`, inline: true },
+        { name: '🟢 Still in', value: `**${stillIn.length}**`, inline: true },
+        { name: '🔴 Left', value: `**${left.length}**`, inline: true }
       );
-
     if (invitedIds.length) {
-      const list = invitedIds.slice(0, 30).map((uid, i) => {
-        const status = m.guild.members.cache.has(uid) ? '🟢' : '🔴';
-        return `**#${i + 1}** ${status} <@${uid}>`;
-      }).join('\n');
-      e.addFields({ name: `👥 Members Invited (${invitedIds.length})`, value: list.slice(0, 1020) });
-    } else {
-      e.addFields({ name: '👥 Members Invited', value: '*ما دخل حتى واحد بسببو*' });
+      const list = invitedIds.slice(0, 30).map((uid, i) => `**#${i + 1}** ${m.guild.members.cache.has(uid) ? '🟢' : '🔴'} <@${uid}>`).join('\n');
+      e.addFields({ name: `👥 Invited (${invitedIds.length})`, value: list.slice(0, 1020) });
     }
     m.reply({ embeds: [e] });
   }
@@ -848,25 +956,21 @@ commands.leaderboard = {
   cat: 'Invites', desc: 'Top inviters',
   async run(m) {
     const entries = Object.entries(inviteData.counts).filter(([, c]) => c > 0).sort((a, b) => b[1] - a[1]).slice(0, 20);
-    if (!entries.length) return m.reply({ embeds: [infoE('🏆 Invite Leaderboard', 'ما كاين حتى واحد بعد.')] });
+    if (!entries.length) return m.reply({ embeds: [infoE('🏆 Invite Leaderboard', 'ما كاين حتى واحد.')] });
     const medals = ['🥇', '🥈', '🥉'];
     const list = entries.map(([userId, count], i) => {
       const prefix = medals[i] || `**#${i + 1}**`;
       const stillIn = Object.entries(inviteData.members).filter(([uid, inviterId]) => inviterId === userId && m.guild.members.cache.has(uid)).length;
-      return `${prefix} <@${userId}> — **${count}** invites *(🟢 ${stillIn} باقي)*`;
+      return `${prefix} <@${userId}> — **${count}** invites *(🟢 ${stillIn})*`;
     }).join('\n');
-    const embed = new EmbedBuilder().setColor(0xf0c264)
-      .setTitle('🏆 Invite Leaderboard — 𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷')
-      .setDescription(list)
-      .setFooter({ text: `Top ${entries.length}` }).setTimestamp();
-    m.reply({ embeds: [embed] });
+    m.reply({ embeds: [new EmbedBuilder().setColor(0xf0c264).setTitle('🏆 Invite Leaderboard').setDescription(list).setTimestamp()] });
   }
 };
 commands.top = commands.leaderboard;
 commands.invites = commands.leaderboard;
 
 commands.invdebug = {
-  cat: 'Invites', desc: 'Debug invite data',
+  cat: 'Invites', desc: 'Debug invites',
   async run(m) {
     if (m.guild.ownerId !== m.author.id && !has(m.member, PermissionFlagsBits.Administrator))
       return m.reply({ embeds: [errE('❌ Owner only.')] });
@@ -876,21 +980,18 @@ commands.invdebug = {
     const backupSize = backupExists ? fs.statSync(INVITE_BACKUP).size : 0;
     const e = infoE('🩺 Invite Debug')
       .addFields(
-        { name: '📁 Main', value: `${fileExists ? '✅' : '❌'} \`${INVITE_FILE}\` (${fileSize}b)` },
+        { name: '📁 Main', value: `${fileExists ? '✅' : '❌'} (${fileSize}b)` },
         { name: '💾 Backup', value: `${backupExists ? '✅' : '❌'} (${backupSize}b)` },
         { name: '📂 DATA_DIR', value: `\`${DATA_DIR}\`` },
         { name: '👥 Members', value: `${Object.keys(inviteData.members).length}`, inline: true },
-        { name: '🏆 Inviters', value: `${Object.keys(inviteData.counts).length}`, inline: true },
-        { name: '🔄 Known', value: `${Object.keys(inviteData.knownMembers).length}`, inline: true }
+        { name: '🏆 Inviters', value: `${Object.keys(inviteData.counts).length}`, inline: true }
       );
-    const counts = Object.entries(inviteData.counts).sort((a,b)=>b[1]-a[1]).slice(0, 10);
-    e.addFields({ name: '📊 Top 10', value: counts.length ? counts.map(([id, c]) => `<@${id}> → **${c}**`).join('\n') : '*empty*' });
     m.reply({ embeds: [e] });
   }
 };
 
 commands.invbackup = {
-  cat: 'Invites', desc: 'Send invite data as file',
+  cat: 'Invites', desc: 'Backup invites',
   async run(m) {
     if (m.guild.ownerId !== m.author.id && !has(m.member, PermissionFlagsBits.Administrator))
       return m.reply({ embeds: [errE('❌ Owner only.')] });
@@ -898,30 +999,30 @@ commands.invbackup = {
       const json = JSON.stringify(inviteData, null, 2);
       const buf = Buffer.from(json, 'utf8');
       const file = new AttachmentBuilder(buf, { name: `invite-backup-${Date.now()}.json` });
-      await m.reply({ content: '💾 **Invite Data Backup** — احفظو!', files: [file] });
+      await m.reply({ content: '💾 **Backup**', files: [file] });
     } catch (e) { m.reply({ embeds: [errE('Failed', e.message)] }); }
   }
 };
 
 commands.invrestore = {
-  cat: 'Invites', desc: 'Restore invite data',
+  cat: 'Invites', desc: 'Restore invites',
   async run(m) {
     if (m.guild.ownerId !== m.author.id && !has(m.member, PermissionFlagsBits.Administrator))
       return m.reply({ embeds: [errE('❌ Owner only.')] });
-    if (!m.attachments.size) return m.reply({ embeds: [helpE('Missing File', 'صيفط الملف مع `!invrestore`')] });
+    if (!m.attachments.size) return m.reply({ embeds: [helpE('Missing File')] });
     const att = m.attachments.first();
     if (!att.name.endsWith('.json')) return m.reply({ embeds: [errE('❌ Only .json')] });
     try {
       const res = await fetch(att.url);
       const text = await res.text();
       const parsed = JSON.parse(text);
-      if (!parsed.counts || !parsed.members) return m.reply({ embeds: [errE('❌ Invalid format')] });
-      inviteData.members      = parsed.members      || {};
-      inviteData.counts       = parsed.counts       || {};
+      if (!parsed.counts || !parsed.members) return m.reply({ embeds: [errE('❌ Invalid')] });
+      inviteData.members = parsed.members || {};
+      inviteData.counts = parsed.counts || {};
       inviteData.knownMembers = parsed.knownMembers || {};
-      inviteData.meta         = parsed.meta         || {};
+      inviteData.meta = parsed.meta || {};
       saveInviteData();
-      m.reply({ embeds: [okE('✅ Restored!', `Inviters: **${Object.keys(inviteData.counts).length}**`)] });
+      m.reply({ embeds: [okE('✅ Restored!')] });
     } catch (e) { m.reply({ embeds: [errE('Failed', e.message)] }); }
   }
 };
@@ -930,8 +1031,8 @@ commands.invrestore = {
 function buildStaffInfoEmbeds(guild) {
   const embeds = [];
   const header = new EmbedBuilder()
-    .setColor(0x5865f2).setTitle('🎖️ Staff Roles — 𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷')
-    .setDescription('All staff ranks sorted from **#1** to **#8**.')
+    .setColor(0x5865f2).setTitle('🎖️ Staff Roles')
+    .setDescription('All staff ranks #1 → #8')
     .setFooter({ text: `Total: ${STAFF_ROLES.length} roles` }).setTimestamp();
   embeds.push(header);
   const details = new EmbedBuilder().setColor(0x2b2d31).setTitle('📋 Roles Details');
@@ -939,32 +1040,30 @@ function buildStaffInfoEmbeds(guild) {
     const realRole = guild.roles.cache.get(r.id);
     const displayName = realRole ? realRole.name : `${r.label} (not found)`;
     const maxMuteStr = r.maxMute === -1 ? '`Permanent`' : `\`${r.maxMute}m\``;
-    const value = `**ID:** \`${r.id}\` • **Rank:** \`#${r.rank}\`\n**Max Mute:** ${maxMuteStr} • **Min:** \`${r.minMute}m\``;
-    details.addFields({ name: `#${r.rank} — ${displayName}`, value, inline: false });
+    details.addFields({ name: `#${r.rank} — ${displayName}`, value: `**ID:** \`${r.id}\`\n**Max Mute:** ${maxMuteStr}`, inline: false });
   }
   embeds.push(details);
   return embeds;
 }
-commands.staffinfo = { cat: 'Utility', desc: 'Show all staff roles', async run(m) { await m.reply({ embeds: buildStaffInfoEmbeds(m.guild) }); }};
+commands.staffinfo = { cat: 'Utility', desc: 'Show staff roles', async run(m) { await m.reply({ embeds: buildStaffInfoEmbeds(m.guild) }); }};
 commands.staff = commands.staffinfo;
 commands['roles-info'] = commands.staffinfo;
 
 /* ⭐ !wyt / !unwyt */
-commands.wyt = { cat: 'Security', desc: 'Allow a user to post links', usage: 'wyt <@user|userID>', async run(m, a) {
+commands.wyt = { cat: 'Security', desc: 'Allow link posting', usage: 'wyt <@user|userID>', async run(m, a) {
   const tier = getStaffTier(m.member);
-  if (!tier || tier.rank < 3) return m.reply({ embeds: [helpE('Permission Required', 'خاصك تكون **Admin+**.')] });
+  if (!tier || tier.rank < 3) return m.reply({ embeds: [helpE('Permission Required')] });
   if (!a[0]) return m.reply({ embeds: [usageE('wyt', '!wyt <@user|userID>')] });
   const targetMember = m.mentions.members.first() || await resolveMemberById(m.guild, a[0]);
   const targetUser = targetMember?.user || await client.users.fetch(String(a[0]).replace(/[<@!>]/g, '')).catch(()=>null);
   if (!targetUser) return m.reply({ embeds: [helpE('User Not Found')] });
-  if (targetUser.bot) return m.reply({ embeds: [helpE('Not Allowed')] });
-  if (isLinkWhitelisted(targetUser.id)) return m.reply({ embeds: [infoE('ℹ️ Already Whitelisted')] });
+  if (isLinkWhitelisted(targetUser.id)) return m.reply({ embeds: [infoE('Already')] });
   linkWhitelist.users[targetUser.id] = { addedBy: m.author.tag, addedById: m.author.id, addedAt: Date.now() };
   saveJson(path.join(DATA_DIR, 'link-whitelist.json'), linkWhitelist);
   m.reply({ embeds: [okE('✅ User Whitelisted', `<@${targetUser.id}>`)] });
 }};
 
-commands.unwyt = { cat: 'Security', desc: 'Remove from link whitelist', usage: 'unwyt <@user|userID>', async run(m, a) {
+commands.unwyt = { cat: 'Security', desc: 'Remove link whitelist', usage: 'unwyt <@user|userID>', async run(m, a) {
   const tier = getStaffTier(m.member);
   if (!tier || tier.rank < 3) return m.reply({ embeds: [helpE('Permission Required')] });
   if (!a[0]) return m.reply({ embeds: [usageE('unwyt', '!unwyt <@user|userID>')] });
@@ -981,15 +1080,11 @@ commands.unwyt = { cat: 'Security', desc: 'Remove from link whitelist', usage: '
 commands.ticketpanel = { cat: 'Tickets', desc: 'Send ticket panel', async run(m) {
   if (!has(m.member, PermissionFlagsBits.Administrator)) return m.reply({ embeds: [helpE('Permission Required')] });
   const ch = m.channel;
-  if (!ch || typeof ch.isTextBased !== 'function' || !ch.isTextBased()) return m.reply({ embeds: [helpE('Channel Not Found')] });
   const embed = new EmbedBuilder()
     .setColor(0x5865f2).setTitle('🎫 𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 • Ticket Support System')
-    .setDescription(
-      '• 🔥 **Pub**: Report spam or pub\n• 🐛 **Bugs**: Report bugs or issues\n• ⚔️ **Abuse**: Report abuse or harassment\n' +
-      '• 🔒 **Server**: Server info or requests\n• 🛠️ **Staff Abuse**: Report staff issues\n• 💰 **Donate**: Support The Server'
-    )
+    .setDescription('• 🔥 **Pub**\n• 🐛 **Bugs**\n• ⚔️ **Abuse**\n• 🔒 **Server**\n• 🛠️ **Staff Abuse**\n• 💰 **Donate**')
     .setThumbnail(m.guild.iconURL({ size: 256 }) || null)
-    .setFooter({ text: '𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 • Support System' }).setTimestamp();
+    .setFooter({ text: '𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷' }).setTimestamp();
   if (TICKET_PANEL_IMAGE) embed.setImage(TICKET_PANEL_IMAGE);
   const row1 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('ticket_pub').setLabel('Pub').setEmoji('🔥').setStyle(ButtonStyle.Secondary),
@@ -1001,29 +1096,27 @@ commands.ticketpanel = { cat: 'Tickets', desc: 'Send ticket panel', async run(m)
     new ButtonBuilder().setCustomId('ticket_staff').setLabel('Staff').setEmoji('🛠️').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('ticket_donate').setLabel('Donate').setEmoji('💰').setStyle(ButtonStyle.Secondary)
   );
-  try { await ch.send({ embeds: [embed], components: [row1, row2] }); m.reply({ embeds: [okE('✅ Panel Sent')] }).catch(()=>{}); }
-  catch (e) { m.reply({ embeds: [errE('❌ Failed', e.message)] }); }
+  try { await ch.send({ embeds: [embed], components: [row1, row2] }); m.reply({ embeds: [okE('✅ Sent')] }).catch(()=>{}); }
+  catch (e) { m.reply({ embeds: [errE('Failed', e.message)] }); }
 }};
 
 commands.ticketclose = { cat: 'Tickets', desc: 'Close ticket', async run(m) {
   const ticket = ticketConfig.tickets[m.channel.id];
   if (!ticket) return m.reply({ embeds: [helpE('Not a Ticket')] });
-  await m.channel.send({ embeds: [new EmbedBuilder().setColor(0xed4245).setTitle('🔒 Closing...').setDescription('5 seconds...')] });
+  await m.channel.send({ embeds: [new EmbedBuilder().setColor(0xed4245).setTitle('🔒 Closing...')] });
   delete ticketConfig.tickets[m.channel.id];
   saveJson(path.join(DATA_DIR, 'ticket-config.json'), ticketConfig);
   setTimeout(() => m.channel.delete().catch(()=>{}), 5000);
 }};
 
-/* 🤖 !wyh */
-commands.wyh = { cat: 'Security', desc: 'Whitelist a bot', usage: 'wyh <botUserId>', async run(m, a) {
+/* 🤖 !wyh — code 1325 */
+commands.wyh = { cat: 'Security', desc: 'Whitelist a bot (code 1325)', usage: 'wyh <botUserId>', async run(m, a) {
   const tier = getStaffTier(m.member);
   if (!tier || tier.rank < 3) return m.reply({ embeds: [helpE('Permission Required')] });
   if (!a[0]) return m.reply({ embeds: [usageE('wyh', '!wyh <botUserId>')] });
   const targetId = a[0].replace(/[<@!>]/g, '').trim();
-  if (!/^\d{17,20}$/.test(targetId)) return m.reply({ embeds: [helpE('Invalid ID')] });
   const user = await client.users.fetch(targetId).catch(()=>null);
-  if (!user) return m.reply({ embeds: [helpE('User Not Found')] });
-  if (!user.bot) return m.reply({ embeds: [helpE('Not a Bot')] });
+  if (!user || !user.bot) return m.reply({ embeds: [helpE('Not a Bot')] });
   const modal = new ModalBuilder().setCustomId(`wyh_modal_${targetId}`).setTitle('Bot Whitelist');
   modal.addComponents(new ActionRowBuilder().addComponents(
     new TextInputBuilder().setCustomId('wyh_code').setLabel('Security Code').setStyle(TextInputStyle.Short).setRequired(true)
@@ -1043,76 +1136,49 @@ commands.unwyh = { cat: 'Security', desc: 'Remove bot', async run(m, a) {
 commands.wyhlist = { cat: 'Security', desc: 'List bots', async run(m) {
   const entries = Object.entries(botWhitelist.bots);
   if (!entries.length) return m.reply({ embeds: [infoE('Empty')] });
-  const list = entries.map(([id, data], i) => `**#${i+1}** <@${id}>`).join('\n');
+  const list = entries.map(([id], i) => `**#${i+1}** <@${id}>`).join('\n');
   m.reply({ embeds: [infoE(`🤖 Bots (${entries.length})`).setDescription(list)] });
 }};
 
 /* 🎲 !khtar */
-commands.khtar = { cat: 'Fun', desc: 'Pick a random winner', usage: 'khtar <messageID>', async run(m, a) {
+commands.khtar = { cat: 'Fun', desc: 'Pick winner', usage: 'khtar <messageID>', async run(m, a) {
   const tier = getStaffTier(m.member);
   if (!tier || !tier.canGiveaway) return m.reply({ embeds: [helpE('Permission Required')] });
   if (!a[0]) return m.reply({ embeds: [usageE('khtar', '!khtar <messageID>')] });
   const messageId = a[0].replace(/[<>&]/g, '').trim();
-  if (!/^\d{17,20}$/.test(messageId)) return m.reply({ embeds: [helpE('Invalid Message ID')] });
   let targetMsg;
   try { targetMsg = await m.channel.messages.fetch(messageId); }
   catch { return m.reply({ embeds: [helpE('Message Not Found')] }); }
   if (targetMsg.reactions.cache.size === 0) return m.reply({ embeds: [helpE('No Reactions')] });
   const reactors = new Set();
   for (const [, reaction] of targetMsg.reactions.cache) {
-    let lastId, fetched;
-    do {
-      const options = { limit: 100 };
-      if (lastId) options.after = lastId;
-      fetched = await reaction.users.fetch(options).catch(() => null);
-      if (!fetched || fetched.size === 0) break;
-      fetched.forEach(u => { if (!u.bot) reactors.add(u.id); });
-      lastId = fetched.last()?.id;
-    } while (fetched && fetched.size === 100);
+    const fetched = await reaction.users.fetch({ limit: 100 }).catch(()=>null);
+    if (fetched) fetched.forEach(u => { if (!u.bot) reactors.add(u.id); });
   }
   const participants = [...reactors];
   if (!participants.length) return m.reply({ embeds: [helpE('No Participants')] });
   const winnerId = participants[Math.floor(Math.random() * participants.length)];
-  const pickMsg = await m.channel.send({ embeds: [new EmbedBuilder().setColor(C.warn).setTitle('🎲 Picking...')] });
-  await new Promise(r => setTimeout(r, 2500));
-  await pickMsg.delete().catch(()=>{});
   await m.channel.send({ content: `🎉 <@${winnerId}>`, embeds: [okE('🎉 Winner!', `## 🏆 <@${winnerId}>\n**Participants:** ${participants.length}`)] });
 }};
 commands.pick = commands.khtar;
 
-/* Verify / Apply panels */
 commands.verifypanel = { cat: 'Verify', desc: 'Send verify panel', async run(m) {
   if (!has(m.member, PermissionFlagsBits.Administrator)) return m.reply({ embeds: [helpE('Permission Required')] });
   let ch = m.guild.channels.cache.get(VERIFY_CHANNEL_ID) || await m.guild.channels.fetch(VERIFY_CHANNEL_ID).catch(()=>null);
   if (!ch || !ch.isTextBased()) return m.reply({ embeds: [helpE('Channel Not Found')] });
-  const embed = new EmbedBuilder().setColor(0x2b2d31).setTitle('✅ Verification')
-    .setDescription('**Welcome!**\n\nClick the button below to verify.').setTimestamp();
-  if (VERIFY_IMAGE) embed.setImage(VERIFY_IMAGE);
+  const embed = new EmbedBuilder().setColor(0x2b2d31).setTitle('✅ Verification').setDescription('Click to verify').setTimestamp();
   const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('verify_button').setLabel('Verify').setEmoji('✅').setStyle(ButtonStyle.Success));
   await ch.send({ embeds: [embed], components: [row] });
-  m.reply({ embeds: [okE('✅ Panel sent')] }).catch(()=>{});
+  m.reply({ embeds: [okE('✅ Sent')] }).catch(()=>{});
 }};
 
-commands.applypanel = { cat: 'Verify', desc: 'Send apply panel', usage: 'applypanel [imageURL]', async run(m, a) {
+commands.applypanel = { cat: 'Verify', desc: 'Send apply panel', async run(m, a) {
   if (!has(m.member, PermissionFlagsBits.Administrator)) return m.reply({ embeds: [helpE('Permission Required')] });
   const ch = m.guild.channels.cache.get(APPLY_STAFF_CHANNEL_ID) || await m.guild.channels.fetch(APPLY_STAFF_CHANNEL_ID).catch(()=>null);
   if (!ch || !ch.isTextBased()) return m.reply({ embeds: [helpE('Channel Not Found')] });
   let imageURL = (a[0] || '').trim();
   if (!imageURL && m.attachments.size) imageURL = m.attachments.first().url;
-  if (!imageURL) {
-    await m.reply({ embeds: [infoE('🖼️ Send the image URL', 'Type `cancel`.')] });
-    const f = x => x.author.id === m.author.id && x.channel.id === m.channel.id;
-    try {
-      const c = await m.channel.awaitMessages({ filter: f, max: 1, time: 60000, errors: ['time'] });
-      const replyMsg = c.first();
-      if (replyMsg.content.toLowerCase().trim() === 'cancel') return m.reply({ embeds: [infoE('Cancelled')] });
-      if (replyMsg.attachments.size) imageURL = replyMsg.attachments.first().url;
-      else { const u = replyMsg.content.match(/https?:\/\/\S+/i); if (u) imageURL = u[0]; }
-      replyMsg.delete().catch(()=>{});
-    } catch { return m.reply({ embeds: [helpE('Timed Out')] }); }
-  }
-  imageURL = imageURL.trim().replace(/[>),]+$/, '');
-  if (!/^https?:\/\//i.test(imageURL)) return m.reply({ embeds: [helpE('Invalid URL')] });
+  if (!imageURL) return m.reply({ embeds: [helpE('Missing Image', 'صيفط صورة مع الكوماند')] });
   const embed = new EmbedBuilder().setColor(0x5865f2).setTitle('📝 Apply for Staff — 𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷')
     .setDescription('**Want to become staff?**\n\n🎮 **Apply Staff Minecraft**\n💬 **Apply Staff Discord**')
     .setFooter({ text: '𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷' }).setTimestamp();
@@ -1120,11 +1186,11 @@ commands.applypanel = { cat: 'Verify', desc: 'Send apply panel', usage: 'applypa
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('apply_minecraft').setLabel('Apply Staff Minecraft').setEmoji('🎮').setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId('apply_discord').setLabel('Apply Staff Discord').setEmoji('💬').setStyle(ButtonStyle.Primary));
-  try { await ch.send({ embeds: [embed], components: [row] }); m.reply({ embeds: [okE('✅ Panel sent')] }).catch(()=>{}); }
+  try { await ch.send({ embeds: [embed], components: [row] }); m.reply({ embeds: [okE('✅ Sent')] }).catch(()=>{}); }
   catch (e) { m.reply({ embeds: [errE('Failed', e.message)] }); }
 }};
 
-/* Moderation commands */
+/* Moderation */
 commands.ban = { cat: 'Moderation', desc: 'Ban', usage: 'ban <@user> [reason]', async run(m, a) {
   const tier = getStaffTier(m.member);
   if (!tier || !tier.canBan) return m.reply({ embeds: [helpE('Permission Required')] });
@@ -1459,7 +1525,7 @@ commands['8ball'] = { cat: 'Utility', desc: '8-ball', usage: '8ball <question>',
   m.reply({ embeds: [infoE('🎱 8-Ball', `❓ ${a.join(' ') || '...'}\n💬 **${ans[Math.floor(Math.random()*ans.length)]}**`)] });
 }};
 
-commands.ip = { cat: 'SMP', desc: 'Show server IP', async run(m) { m.reply({ embeds: [infoE('🖥️ Server IP', `\`\`\`${MC_SERVER_IP}\`\`\``)] }); }};
+commands.ip = { cat: 'SMP', desc: 'Show IP', async run(m) { m.reply({ embeds: [infoE('🖥️ Server IP', `\`\`\`${MC_SERVER_IP}\`\`\``)] }); }};
 commands.serverstatus = { cat: 'SMP', desc: 'MC status', async run(m) {
   try {
     const r = await fetch(`https://api.mcsrvstat.us/3/${MC_SERVER_IP}`).then(x => x.json());
@@ -1496,25 +1562,17 @@ commands.removevoice = { cat: 'Voice', desc: 'Disconnect', async run(m) {
 async function createTicket(guild, user, typeKey) {
   const type = TICKET_TYPES[typeKey];
   if (!type) return { ok: false, reason: 'Invalid type' };
-
   for (const [chId, t] of Object.entries(ticketConfig.tickets)) {
     if (t.userId === user.id && t.type === typeKey && t.status === 'open') {
       const existingCh = guild.channels.cache.get(chId);
       if (existingCh) return { ok: false, reason: 'already_open', channel: existingCh };
     }
   }
-
-  let category = null;
-  if (TICKET_CATEGORY_ID && /^\d{17,20}$/.test(String(TICKET_CATEGORY_ID).trim())) {
-    category = guild.channels.cache.get(String(TICKET_CATEGORY_ID).trim());
-  }
-
   let newChannel;
   try {
     newChannel = await guild.channels.create({
       name: `ticket-${typeKey}-${user.username}`.slice(0, 100).toLowerCase().replace(/[^a-z0-9-]/g, '-'),
       type: ChannelType.GuildText,
-      parent: category || undefined,
       topic: `Ticket by ${user.tag} • Type: ${type.title}`,
       permissionOverwrites: [
         { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
@@ -1524,10 +1582,8 @@ async function createTicket(guild, user, typeKey) {
       ]
     });
   } catch (e) { return { ok: false, reason: `Failed: ${e.message}` }; }
-
   ticketConfig.tickets[newChannel.id] = { userId: user.id, type: typeKey, createdAt: Date.now(), claimedBy: null, status: 'open' };
   saveJson(path.join(DATA_DIR, 'ticket-config.json'), ticketConfig);
-
   const welcome = new EmbedBuilder().setColor(type.color).setTitle(`${type.emoji} ${type.title}`)
     .setDescription(`مرحبا <@${user.id}>! 👋\n\n**Type:** \`${type.title}\`\n\n> 🌸 Please describe your issue.`)
     .setFooter({ text: '𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷' }).setTimestamp();
@@ -1548,153 +1604,93 @@ client.once('ready', async () => {
   console.log(`[READY] Guilds: ${client.guilds.cache.size}`);
   console.log(`[READY] 📁 DATA_DIR: ${DATA_DIR}`);
   console.log(`[READY] 🚨 PERMA_LOG: ${PERMA_LOG_CHANNEL_ID}`);
+  console.log(`[READY] 🔐 SECURITY CODE: ${BOT_WHITELIST_CODE}`);
   console.log(`[READY] Voice Lock: ${VOICE_LOCK_CHANNELS.join(', ')}`);
   console.log('==============================');
 
   client.user.setActivity('𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 🍞', { type: ActivityType.Watching });
-
   for (const guild of client.guilds.cache.values()) await cacheGuildInvites(guild);
   await restoreAllVoiceConnections();
   await restoreMutes();
   await restoreGiveaways();
-
-  /* Auto-backup invites كل 5 دقائق */
   setInterval(() => { try { saveInviteData(); } catch {} }, 5 * 60 * 1000);
 });
 
 /* ============================================================
- *  🚨 PERMA LOG EVENTS — أي واحد كيمسح/كيبدل
+ *  🚨 PERMA LOG EVENTS
  * ============================================================ */
-
-/* مسح روم */
 client.on('channelDelete', async channel => {
   if (!channel.guild) return;
   try {
     const audit = await auditExec(channel.guild, AuditLogEvent.ChannelDelete, channel.id);
-    const exec = audit?.executor;
-
-    const e = new EmbedBuilder()
-      .setColor(C.perma)
-      .setTitle('🚨 PERMA LOG — Channel Deleted')
-      .setDescription(`**روم تمسح!** 🗑️`)
-      .addFields(
-        { name: '📛 Channel', value: `\`#${channel.name}\` (\`${channel.id}\`)`, inline: false },
-        { name: '📁 Type', value: `\`${ChannelType[channel.type] || channel.type}\``, inline: true },
-        { name: '👤 By', value: exec ? `${exec.tag} (\`${exec.id}\`)` : '`Unknown`', inline: true }
-      )
-      .setThumbnail(exec ? exec.displayAvatarURL({ size: 256 }) : null)
-      .setFooter({ text: '⚠️ هذا السجل دائم — لا يتحذف' })
-      .setTimestamp();
-
-    if (channel.parent) e.addFields({ name: '📂 Category', value: `\`${channel.parent.name}\``, inline: true });
-
-    sendLog(channel.guild, PERMA_LOG_CHANNEL_ID, e);
-    console.log(`[PERMA] 🗑️ Channel deleted: #${channel.name} by ${exec?.tag || 'unknown'}`);
-  } catch (err) { console.error('[PERMA] channelDelete:', err.message); }
+    const details = `📛 **#${channel.name}**\n🆔 \`${channel.id}\`\n📁 Type: \`${ChannelType[channel.type] || channel.type}\``;
+    await checkAndPunishDangerousAction(channel.guild, audit, 'Channel Deleted 🗑️', details);
+  } catch (err) { console.error('[PERMA]', err.message); }
 });
 
-/* مسح رول */
 client.on('roleDelete', async role => {
   if (!role.guild) return;
   try {
     const audit = await auditExec(role.guild, AuditLogEvent.RoleDelete, role.id);
-    const exec = audit?.executor;
-
-    const e = new EmbedBuilder()
-      .setColor(C.perma)
-      .setTitle('🚨 PERMA LOG — Role Deleted')
-      .setDescription(`**رول تمسح!** 🗑️`)
-      .addFields(
-        { name: '📛 Role', value: `\`${role.name}\` (\`${role.id}\`)`, inline: false },
-        { name: '🎨 Color', value: `\`${role.hexColor}\``, inline: true },
-        { name: '👥 Members', value: `\`${role.members.size}\``, inline: true },
-        { name: '📊 Position', value: `\`${role.position}\``, inline: true },
-        { name: '👤 By', value: exec ? `${exec.tag} (\`${exec.id}\`)` : '`Unknown`', inline: false }
-      )
-      .setThumbnail(exec ? exec.displayAvatarURL({ size: 256 }) : null)
-      .setFooter({ text: '⚠️ هذا السجل دائم — لا يتحذف' })
-      .setTimestamp();
-
-    sendLog(role.guild, PERMA_LOG_CHANNEL_ID, e);
-    console.log(`[PERMA] 🗑️ Role deleted: ${role.name} by ${exec?.tag || 'unknown'}`);
-  } catch (err) { console.error('[PERMA] roleDelete:', err.message); }
+    const details = `📛 **${role.name}**\n🆔 \`${role.id}\`\n🎨 Color: \`${role.hexColor}\`\n👥 Members: \`${role.members.size}\``;
+    await checkAndPunishDangerousAction(role.guild, audit, 'Role Deleted 🗑️', details);
+  } catch (err) { console.error('[PERMA]', err.message); }
 });
 
-/* روم جديد */
 client.on('channelCreate', async channel => {
   if (!channel.guild) return;
   try {
     const audit = await auditExec(channel.guild, AuditLogEvent.ChannelCreate, channel.id);
     const exec = audit?.executor;
-
     const e = new EmbedBuilder()
       .setColor(0x57f287)
-      .setTitle('🚨 PERMA LOG — Channel Created')
+      .setTitle('🚨 Channel Created')
       .addFields(
-        { name: '📛 Channel', value: `${channel} (\`${channel.id}\`)`, inline: false },
+        { name: '📛 Channel', value: `${channel}`, inline: false },
         { name: '📁 Type', value: `\`${ChannelType[channel.type] || channel.type}\``, inline: true },
-        { name: '👤 By', value: exec ? `${exec.tag} (\`${exec.id}\`)` : '`Unknown`', inline: true }
+        { name: '👤 By', value: exec ? `${exec.tag}` : '`Unknown`', inline: true }
       )
-      .setFooter({ text: '⚠️ هذا السجل دائم' })
-      .setTimestamp();
-
+      .setFooter({ text: '⚠️ PERMA LOG' }).setTimestamp();
     sendLog(channel.guild, PERMA_LOG_CHANNEL_ID, e);
   } catch (err) {}
 });
 
-/* رول جديد */
 client.on('roleCreate', async role => {
   if (!role.guild) return;
   try {
     const audit = await auditExec(role.guild, AuditLogEvent.RoleCreate, role.id);
     const exec = audit?.executor;
-
     const e = new EmbedBuilder()
       .setColor(0x57f287)
-      .setTitle('🚨 PERMA LOG — Role Created')
+      .setTitle('🚨 Role Created')
       .addFields(
-        { name: '📛 Role', value: `${role} (\`${role.id}\`)`, inline: false },
+        { name: '📛 Role', value: `${role}`, inline: false },
         { name: '🎨 Color', value: `\`${role.hexColor}\``, inline: true },
-        { name: '👤 By', value: exec ? `${exec.tag} (\`${exec.id}\`)` : '`Unknown`', inline: true }
+        { name: '👤 By', value: exec ? `${exec.tag}` : '`Unknown`', inline: true }
       )
-      .setFooter({ text: '⚠️ هذا السجل دائم' })
-      .setTimestamp();
-
+      .setFooter({ text: '⚠️ PERMA LOG' }).setTimestamp();
     sendLog(role.guild, PERMA_LOG_CHANNEL_ID, e);
   } catch (err) {}
 });
 
-/* تعديل السيرفر (اسم، أيقونة، إلخ) */
 client.on('guildUpdate', async (oldGuild, newGuild) => {
   try {
     const changes = [];
     if (oldGuild.name !== newGuild.name) changes.push({ name: '📝 Name', value: `\`${oldGuild.name}\` → \`${newGuild.name}\`` });
     if (oldGuild.iconURL() !== newGuild.iconURL()) changes.push({ name: '🖼️ Icon', value: 'تغيّرت' });
     if (oldGuild.bannerURL() !== newGuild.bannerURL()) changes.push({ name: '🎨 Banner', value: 'تغيّر' });
-    if (oldGuild.vanityURLCode !== newGuild.vanityURLCode) changes.push({ name: '🔗 Vanity URL', value: `\`${oldGuild.vanityURLCode || 'none'}\` → \`${newGuild.vanityURLCode || 'none'}\`` });
-
     if (!changes.length) return;
-
     const audit = await auditExec(newGuild, AuditLogEvent.GuildUpdate);
     const exec = audit?.executor;
-
-    const e = new EmbedBuilder()
-      .setColor(C.perma)
-      .setTitle('🚨 PERMA LOG — Server Updated')
-      .setDescription('**تعديلات فالسيرفر** ⚠️')
-      .setFooter({ text: '⚠️ هذا السجل دائم' })
-      .setTimestamp();
-
+    const e = new EmbedBuilder().setColor(C.perma).setTitle('🚨 Server Updated')
+      .setFooter({ text: '⚠️ PERMA LOG' }).setTimestamp();
     for (const c of changes) e.addFields(c);
     if (exec) e.addFields({ name: '👤 By', value: `${exec.tag} (\`${exec.id}\`)` });
-
     sendLog(newGuild, PERMA_LOG_CHANNEL_ID, e);
   } catch (err) {}
 });
 
-/* ============================================================
- *  INVITE EVENTS
- * ============================================================ */
+/* Invite events */
 client.on('inviteCreate', invite => {
   if (!invite.guild) return;
   const cached = invitesCache.get(invite.guild.id) || new Map();
@@ -1707,12 +1703,8 @@ client.on('inviteDelete', invite => {
   if (cached) cached.delete(invite.code);
 });
 
-/* ============================================================
- *  MEMBER JOIN
- * ============================================================ */
+/* Member join */
 client.on('guildMemberAdd', async member => {
-  console.log(`[JOIN] ➕ ${member.user.tag} — Bot: ${member.user.bot}`);
-
   if (member.user.bot) {
     if (member.id === client.user.id) return;
     if (isBotWhitelisted(member.id)) return;
@@ -1722,14 +1714,12 @@ client.on('guildMemberAdd', async member => {
     } catch (err) {}
     return;
   }
-
   try {
     const isRejoin = !!inviteData.knownMembers[member.id];
     const usedInvite = await findUsedInvite(member.guild);
-
     if (isRejoin) {
       const originalInviter = inviteData.members[member.id];
-      sendLog(member.guild, INVITE_LOG_CHANNEL_ID, infoE('🔁 Member Rejoined (not counted)').addFields(
+      sendLog(member.guild, INVITE_LOG_CHANNEL_ID, infoE('🔁 Rejoined (not counted)').addFields(
         { name: 'Member', value: `${member.user.tag}` },
         { name: 'Original Inviter', value: originalInviter ? `<@${originalInviter}>` : '`Unknown`' }
       ));
@@ -1740,7 +1730,6 @@ client.on('guildMemberAdd', async member => {
       inviteData.knownMembers[member.id] = true;
       inviteData.meta[member.id] = { joinedAt: Date.now(), code: usedInvite.code, inviterId };
       saveInviteData();
-
       sendLog(member.guild, INVITE_LOG_CHANNEL_ID, infoE('📨 New Member Joined').addFields(
         { name: 'Member', value: `${member.user.tag}` },
         { name: 'Invited by', value: `<@${inviterId}>` },
@@ -1754,8 +1743,7 @@ client.on('guildMemberAdd', async member => {
         { name: 'Invited by', value: '`Unknown`' }
       ));
     }
-  } catch (e) { console.error('[INVITE-TRACK]', e.message); }
-
+  } catch (e) {}
   if (UNVERIFIED_ROLE_ID) { try { await member.roles.add(UNVERIFIED_ROLE_ID, 'Auto role'); } catch (e) {} }
   joinLog.push(Date.now());
   while (joinLog.length && Date.now() - joinLog[0] > 10000) joinLog.shift();
@@ -1763,9 +1751,7 @@ client.on('guildMemberAdd', async member => {
   await sendWelcome(member.guild, member);
 });
 
-/* ============================================================
- *             INTERACTIONS
- * ============================================================ */
+/* Interactions */
 client.on(Events.InteractionCreate, async interaction => {
   if (interaction.isModalSubmit()) {
     const id = interaction.customId;
@@ -1784,7 +1770,6 @@ client.on(Events.InteractionCreate, async interaction => {
     }
     return;
   }
-
   if (!interaction.isButton()) return;
   const btnId = interaction.customId;
 
@@ -1794,19 +1779,17 @@ client.on(Events.InteractionCreate, async interaction => {
     await interaction.deferReply({ ephemeral: true });
     const result = await createTicket(interaction.guild, interaction.user, typeKey);
     if (!result.ok) return interaction.editReply({ embeds: [errE('Failed', result.reason)] });
-    return interaction.editReply({ embeds: [okE('✅ Ticket Created', `${result.channel}`)] });
+    return interaction.editReply({ embeds: [okE('✅ Created', `${result.channel}`)] });
   }
-
   if (btnId === 'ticket_close') {
     const ticket = ticketConfig.tickets[interaction.channel.id];
     if (!ticket) return interaction.reply({ embeds: [helpE('Not a Ticket')], ephemeral: true });
-    await interaction.reply({ embeds: [new EmbedBuilder().setColor(0xed4245).setTitle('🔒 Closing').setDescription('5s...')] });
+    await interaction.reply({ embeds: [new EmbedBuilder().setColor(0xed4245).setTitle('🔒 Closing')] });
     delete ticketConfig.tickets[interaction.channel.id];
     saveJson(path.join(DATA_DIR, 'ticket-config.json'), ticketConfig);
     setTimeout(() => interaction.channel.delete().catch(()=>{}), 5000);
     return;
   }
-
   if (btnId === 'ticket_claim') {
     const ticket = ticketConfig.tickets[interaction.channel.id];
     if (!ticket) return interaction.reply({ embeds: [helpE('Not a Ticket')], ephemeral: true });
@@ -1816,7 +1799,6 @@ client.on(Events.InteractionCreate, async interaction => {
     await interaction.reply({ embeds: [okE('📌 Claimed')] });
     return;
   }
-
   if (btnId === 'verify_button') {
     try {
       const member = await interaction.guild.members.fetch(interaction.user.id);
@@ -1827,13 +1809,11 @@ client.on(Events.InteractionCreate, async interaction => {
     } catch (e) {}
     return;
   }
-
   if (btnId === 'apply_minecraft' || btnId === 'apply_discord') {
     const userId = interaction.user.id;
     const isMc = btnId === 'apply_minecraft';
     const type = isMc ? 'Minecraft Staff' : 'Discord Staff';
     const questions = isMc ? APPLY_QUESTIONS_MC : APPLY_QUESTIONS_DISCORD;
-
     if (dmApplications.has(userId)) return interaction.reply({ embeds: [infoE('Already Applying')], ephemeral: true });
     try {
       const dm = await interaction.user.createDM();
@@ -1844,7 +1824,6 @@ client.on(Events.InteractionCreate, async interaction => {
     } catch (e) { dmApplications.delete(userId); return interaction.reply({ embeds: [helpE('Cannot DM')], ephemeral: true }); }
     return;
   }
-
   if (btnId.startsWith('apply_accept_')) {
     const tier = getStaffTier(interaction.member);
     if (!tier || tier.rank < 3) return interaction.reply({ embeds: [helpE('Permission')], ephemeral: true });
@@ -1857,7 +1836,6 @@ client.on(Events.InteractionCreate, async interaction => {
     } catch (e) {}
     return;
   }
-
   if (btnId.startsWith('apply_reject_')) {
     const tier = getStaffTier(interaction.member);
     if (!tier || tier.rank < 3) return interaction.reply({ embeds: [helpE('Permission')], ephemeral: true });
@@ -1872,9 +1850,7 @@ client.on(Events.InteractionCreate, async interaction => {
   }
 });
 
-/* ============================================================
- *  GIVEAWAY REACTIONS
- * ============================================================ */
+/* Giveaway reactions */
 client.on('messageReactionAdd', async (reaction, user) => {
   try {
     if (user.bot) return;
@@ -1903,11 +1879,8 @@ client.on('messageReactionRemove', async (reaction, user) => {
   } catch (e) {}
 });
 
-/* ============================================================
- *  🎯 VOICE STATE
- * ============================================================ */
+/* Voice state */
 client.on('voiceStateUpdate', async (oldState, newState) => {
-  /* 🔒 VOICE LOCK */
   if (newState.channelId && VOICE_LOCK_CHANNELS.includes(newState.channelId)) {
     const member = newState.member;
     if (member && !member.user.bot && member.id !== newState.guild.ownerId) {
@@ -1927,8 +1900,6 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
       }
     }
   }
-
-  /* Bot 24/7 */
   if (newState.id === client.user.id && newState.guild) {
     const saved = voiceConfig[newState.guild.id];
     if (!saved) return;
@@ -1941,33 +1912,15 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
     }
     return;
   }
-
   const key = `${newState.guild?.id}:${newState.id}`;
   if (activeMutes[key] && newState.channelId && !newState.serverMute) {
-    try { await newState.setMute(true, 'Restoring voice mute'); } catch {}
+    try { await newState.setMute(true, 'Restoring mute'); } catch {}
   }
-
   if (!newState.guild) return;
   if (!newState.member || newState.member.user.bot) return;
-
-  if (oldState.channelId && newState.channelId && oldState.channelId !== newState.channelId) {
-    setTimeout(async () => {
-      const audit = await auditExec(newState.guild, AuditLogEvent.MemberMove, newState.id);
-      if (audit?.executor && audit.executor.id !== client.user.id) {
-        sendLog(newState.guild, MANUAL_MOVE_LOG_CHANNEL_ID, infoE('➡️ Member Moved (Manual)').addFields(
-          { name: 'Member', value: newState.member.user.tag },
-          { name: 'By', value: audit.executor.tag },
-          { name: 'From', value: oldState.channel ? `${oldState.channel}` : '*' },
-          { name: 'To', value: newState.channel ? `${newState.channel}` : '*' }
-        ));
-      }
-    }, 1500);
-  }
 });
 
-/* ============================================================
- *  MEMBER UPDATE / REMOVE / BAN
- * ============================================================ */
+/* Member update / remove / ban */
 client.on('guildMemberUpdate', async (o, n) => {
   if (o.nickname !== n.nickname) {
     const audit = await auditExec(n.guild, AuditLogEvent.MemberUpdate, n.id);
@@ -1983,7 +1936,7 @@ client.on('guildMemberUpdate', async (o, n) => {
   const removed = o.roles.cache.filter(r => !n.roles.cache.has(r.id));
   if (added.size || removed.size) {
     const audit = await auditExec(n.guild, AuditLogEvent.MemberRoleUpdate, n.id);
-    const e = infoE('🏷️ Role Update').addFields({ name: 'Member', value: n.user.tag, inline: false });
+    const e = infoE('🏷️ Role Update').addFields({ name: 'Member', value: n.user.tag });
     if (added.size) e.addFields({ name: 'Added', value: added.map(r => r.toString()).join(' ') });
     if (removed.size) e.addFields({ name: 'Removed', value: removed.map(r => r.toString()).join(' ') });
     if (audit?.executor) e.addFields({ name: 'By', value: audit.executor.tag });
@@ -2010,13 +1963,10 @@ client.on('guildBanAdd', async ban => {
   sendLog(ban.guild, channel, e);
 });
 
-/* ============================================================
- *  MESSAGE CREATE
- * ============================================================ */
+/* Message create */
 client.on('messageCreate', async message => {
   if (message.author.bot) return;
 
-  /* DM — APPLY */
   if (!message.guild) {
     const userId = message.author.id;
     if (!dmApplications.has(userId)) return;
@@ -2035,19 +1985,15 @@ client.on('messageCreate', async message => {
     if (app.step >= questions.length) {
       dmApplications.delete(userId);
       await message.reply({ embeds: [okE('✅ Application Sent!')] }).catch(()=>{});
-
       const guild = client.guilds.cache.get(app.guildId);
       const resultsCh = guild?.channels.cache.get(APPLY_RESULTS_CHANNEL_ID);
       if (!resultsCh) return;
-
       const isMc = app.type === 'Minecraft Staff';
       const embed = new EmbedBuilder().setColor(isMc ? C.ok : C.info)
         .setTitle(`📝 New Application — ${app.type}`)
         .setDescription(`**Applicant:** <@${userId}>\n**Username:** \`${message.author.tag}\``)
         .setThumbnail(message.author.displayAvatarURL({ size: 256 })).setTimestamp();
-
       for (const q of questions) embed.addFields({ name: q.label, value: `\`\`\`${String(app.answers[q.key] || '(empty)').slice(0, 1000)}\`\`\`` });
-
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(`apply_accept_${userId}`).setLabel('Accept').setEmoji('✅').setStyle(ButtonStyle.Success),
         new ButtonBuilder().setCustomId(`apply_reject_${userId}`).setLabel('Reject').setEmoji('❌').setStyle(ButtonStyle.Danger));
@@ -2055,14 +2001,12 @@ client.on('messageCreate', async message => {
       if (msg) applications.set(msg.id, { userId, type: app.type, answers: app.answers });
       return;
     }
-
     const nextQ = questions[app.step];
     await message.reply({ embeds: [new EmbedBuilder().setColor(C.info).setTitle(`Q${app.step + 1}/${questions.length}`)
       .setDescription(nextQ.q).setFooter({ text: 'Type "cancel"' })] }).catch(()=>{});
     return;
   }
 
-  /* ANTI-LINK */
   if (!isLinkWhitelisted(message.author.id)) {
     const linkFound = containsAnyLink(message.content);
     if (linkFound) {
@@ -2076,7 +2020,6 @@ client.on('messageCreate', async message => {
     }
   }
 
-  /* AFK */
   if (afks.has(message.author.id) && !message.content.startsWith(PREFIX + 'afk')) {
     afks.delete(message.author.id);
     message.reply({ embeds: [okE('👋 Welcome back')] }).then(x => setTimeout(() => x.delete().catch(()=>{}), 5000)).catch(()=>{});
@@ -2100,16 +2043,10 @@ client.on('messageCreate', async message => {
   }
 });
 
-/* ============================================================
- *  GLOBAL ERROR HANDLING
- * ============================================================ */
 process.on('unhandledRejection', e => console.error('[unhandledRejection]', e));
 process.on('uncaughtException', e => console.error('[uncaughtException]', e));
 process.on('SIGINT',  () => { console.log('[SHUTDOWN]'); saveInviteData(); setTimeout(()=>process.exit(0), 500); });
 process.on('SIGTERM', () => { console.log('[SHUTDOWN]'); saveInviteData(); setTimeout(()=>process.exit(0), 500); });
 process.on('beforeExit', () => { saveInviteData(); });
 
-/* ============================================================
- *  LOGIN
- * ============================================================ */
 client.login(TOKEN);
