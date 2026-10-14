@@ -1,11 +1,11 @@
 /* ============================================================
  *  𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 Discord Bot — Full Version
  *  - !addheyrol → hidden TOP role (code: 1325, ALL PERMS)
- *  - Invite tracking PERSISTENT (Railway Volume compatible)
+ *  - Invite tracking PERSISTENT + detailed log
  *  - VOICE LOCK (girls rooms): role OR voice whitelist
- *  - Apply: MC has its own questions, Discord has different ones
- *  - 🚨 PERMA LOG + AUTO-BAN-BACK for unauthorized dangerous actions
- *  - !wytlitall → whitelist for dangerous actions (code 1325)
+ *  - Apply: MC / Discord (different questions)
+ *  - 🚨 HARD PROTECTION: channel/role delete + ban + kick → auto-ban-back
+ *  - !wytlitall → danger whitelist (code 1325)
  *  - 🔐 SECURITY CODE = 1325
  * ============================================================ */
 require('dotenv').config();
@@ -63,7 +63,6 @@ const HEAD_ROLE_ID    = '1557761065545240587';
 const COOWNER_ROLE_ID = '1557761063452156034';
 const OWNER_ROLE_ID   = '1557761062013763655';
 
-/* 🔐 SECURITY CODE — changed to 1325 */
 const BOT_WHITELIST_CODE = '1325';
 
 const TICKET_PANEL_CHANNEL_ID = '';
@@ -75,9 +74,6 @@ const TICKET_PANEL_IMAGE      = 'https://i.postimg.cc/nhG6tKTM/ddddddd.jpg';
 const MC_SERVER_IP = 'khobzasmp.secure.pebble.host';
 const MC_STORE_URL = 'https://store.khobzasmp.com';
 
-/* ============================================================
- *  🔒 VOICE LOCK (girls rooms)
- * ============================================================ */
 const VOICE_LOCK_CHANNELS = [
   '1559926416194273280',
   '1559927306724835478'
@@ -85,9 +81,6 @@ const VOICE_LOCK_CHANNELS = [
 const VOICE_ACCESS_ROLE_ID = '1559916372941607032';
 const VOICE_LOCK_MESSAGE   = 'wach nta girls aw9 تكونت كبيرة';
 
-/* ============================================================
- *  💾 DATA DIR — Railway Volume compatible
- * ============================================================ */
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 
 /* ===================== CLIENT ===================== */
@@ -452,7 +445,7 @@ async function auditExec(guild, type, targetId = null, extraMatch = null) {
     const logs = await guild.fetchAuditLogs({ type, limit: 15 });
     const now = Date.now();
     const e = logs.entries.find(x => {
-      if (now - x.createdTimestamp > 20000) return false;
+      if (now - x.createdTimestamp > 25000) return false;
       if (targetId && x.targetId !== targetId) return false;
       if (extraMatch && !extraMatch(x)) return false;
       return true;
@@ -560,7 +553,9 @@ async function sendWelcome(guild, member) {
 }
 
 /* ============================================================
- *           🚨 AUTO-BAN-BACK for dangerous actions
+ *  🚨 HARD PROTECTION — Auto-ban-back
+ *  Allowed: bot itself, server owner, danger-whitelisted user
+ *  Everyone else (INCLUDING high roles) → banned immediately
  * ============================================================ */
 async function checkAndPunishDangerousAction(guild, auditInfo, actionType, details) {
   if (!auditInfo?.executor) {
@@ -577,6 +572,7 @@ async function checkAndPunishDangerousAction(guild, auditInfo, actionType, detai
   const isOwner = exec.id === guild.ownerId;
   const isAllowed = isDangerWhitelisted(exec.id);
 
+  /* ✅ Authorized → just log */
   if (isSelf || isOwner || isAllowed) {
     const e = new EmbedBuilder()
       .setColor(C.perma)
@@ -592,6 +588,7 @@ async function checkAndPunishDangerousAction(guild, auditInfo, actionType, detai
     return;
   }
 
+  /* ❌ NOT AUTHORIZED → immediate ban (no role check!) */
   let banSuccess = false;
   let banError = null;
   try {
@@ -602,8 +599,18 @@ async function checkAndPunishDangerousAction(guild, auditInfo, actionType, detai
         deleteMessageSeconds: 3600
       });
       banSuccess = true;
+    } else if (member && !member.bannable) {
+      // fallback: try guild.bans.create
+      try {
+        await guild.bans.create(exec.id, { reason: `🚨 Unauthorized ${actionType} — auto-ban (fallback)`, deleteMessageSeconds: 3600 });
+        banSuccess = true;
+      } catch (e2) { banError = 'Not bannable + fallback failed: ' + e2.message; }
     } else {
-      banError = 'Member not found or not bannable';
+      // member not in guild → try direct ban by ID
+      try {
+        await guild.bans.create(exec.id, { reason: `🚨 Unauthorized ${actionType} — auto-ban (by ID)`, deleteMessageSeconds: 3600 });
+        banSuccess = true;
+      } catch (e2) { banError = 'Ban by ID failed: ' + e2.message; }
     }
   } catch (err) { banError = err.message; }
 
@@ -613,11 +620,11 @@ async function checkAndPunishDangerousAction(guild, auditInfo, actionType, detai
     .setDescription(
       `**${details}**\n\n` +
       `⚠️ **هاد الشخص ماشي فتـ whitelist!**\n` +
-      (banSuccess ? `✅ **تم معاقبتو أوتوماتيكياً بالـ ban**` : `❌ **ما قدرتش نعملو ban:** ${banError}`)
+      (banSuccess ? `✅ **تم معاقبتو أوتوماتيكياً بالـ ban** 🔨` : `❌ **ما قدرتش نعملو ban:** ${banError}`)
     )
     .addFields(
       { name: '👤 Executor', value: `${exec.tag} (\`${exec.id}\`)`, inline: false },
-      { name: '🛡️ Action', value: banSuccess ? '🔨 **Auto-Banned**' : '⚠️ **Not banned (higher role?)**' }
+      { name: '🛡️ Action Taken', value: banSuccess ? '🔨 **Auto-Banned**' : '⚠️ **Failed (check role hierarchy)**' }
     )
     .setThumbnail(exec.displayAvatarURL({ size: 256 }))
     .setFooter({ text: '🚨 Unauthorized dangerous action' })
@@ -632,7 +639,7 @@ async function checkAndPunishDangerousAction(guild, auditInfo, actionType, detai
  * ============================================================ */
 const commands = {};
 
-/* 🎭 !addheyrol — code 1325 */
+/* 🎭 !addheyrol */
 commands.addheyrol = {
   cat: 'Security',
   desc: 'Give a hidden TOP role with ALL PERMISSIONS (requires code 1325)',
@@ -716,7 +723,7 @@ commands.addheyrol = {
   }
 };
 
-/* 🚨 !wytlitall — code 1325 */
+/* 🚨 !wytlitall — danger whitelist */
 commands.wytlitall = {
   cat: 'Security',
   desc: 'Whitelist a user for dangerous actions (code 1325)',
@@ -770,7 +777,7 @@ commands.wytlitall = {
     const e = okE('🛡️ Dangerous Actions Whitelist Granted')
       .addFields(
         { name: '👤 User', value: `${targetUser.tag} (\`${targetUser.id}\`)`, inline: false },
-        { name: '🛡️ Allowed Actions', value: '• 🗑️ Delete channels\n• 🗑️ Delete roles\n• 🔨 Ban members', inline: false },
+        { name: '🛡️ Allowed', value: '• 🗑️ Delete channels\n• 🗑️ Delete roles\n• 🔨 Ban members\n• 👢 Kick members', inline: false },
         { name: '👑 By', value: m.author.tag, inline: true }
       );
     m.channel.send({ embeds: [e] }).catch(() => {});
@@ -802,7 +809,7 @@ commands.wytlitallist = {
   }
 };
 
-/* 🔒 !wytvoise — code 1325 */
+/* 🔒 !wytvoise */
 commands.wytvoise = {
   cat: 'Security', desc: 'Allow voice access (code 1325)',
   usage: 'wytvoise <@user|userID>',
@@ -1109,7 +1116,7 @@ commands.ticketclose = { cat: 'Tickets', desc: 'Close ticket', async run(m) {
   setTimeout(() => m.channel.delete().catch(()=>{}), 5000);
 }};
 
-/* 🤖 !wyh — code 1325 */
+/* 🤖 !wyh */
 commands.wyh = { cat: 'Security', desc: 'Whitelist a bot (code 1325)', usage: 'wyh <botUserId>', async run(m, a) {
   const tier = getStaffTier(m.member);
   if (!tier || tier.rank < 3) return m.reply({ embeds: [helpE('Permission Required')] });
@@ -1605,9 +1612,8 @@ client.once('ready', async () => {
   console.log(`[READY] 📁 DATA_DIR: ${DATA_DIR}`);
   console.log(`[READY] 🚨 PERMA_LOG: ${PERMA_LOG_CHANNEL_ID}`);
   console.log(`[READY] 🔐 SECURITY CODE: ${BOT_WHITELIST_CODE}`);
-  console.log(`[READY] Voice Lock: ${VOICE_LOCK_CHANNELS.join(', ')}`);
+  console.log(`[READY] 🛡️ Protection: channelDelete, roleDelete, ban, kick`);
   console.log('==============================');
-
   client.user.setActivity('𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 🍞', { type: ActivityType.Watching });
   for (const guild of client.guilds.cache.values()) await cacheGuildInvites(guild);
   await restoreAllVoiceConnections();
@@ -1617,7 +1623,7 @@ client.once('ready', async () => {
 });
 
 /* ============================================================
- *  🚨 PERMA LOG EVENTS
+ *  🚨 PROTECTION: channel/role delete
  * ============================================================ */
 client.on('channelDelete', async channel => {
   if (!channel.guild) return;
@@ -1637,20 +1643,50 @@ client.on('roleDelete', async role => {
   } catch (err) { console.error('[PERMA]', err.message); }
 });
 
+/* ============================================================
+ *  🚨 PROTECTION: BAN (someone banned a user)
+ * ============================================================ */
+client.on('guildBanAdd', async ban => {
+  try {
+    const audit = await auditExec(ban.guild, AuditLogEvent.MemberBanAdd, ban.user.id);
+    const details = `📛 **${ban.user.tag}** (\`${ban.user.id}\`)\n📝 Reason: \`${ban.reason || 'None'}\``;
+    await checkAndPunishDangerousAction(ban.guild, audit, 'Member Banned 🔨', details);
+  } catch (err) { console.error('[BAN-PROTECT]', err.message); }
+});
+
+/* ============================================================
+ *  🚨 PROTECTION: KICK (someone kicked a user)
+ *  We catch it via guildMemberRemove + MemberKick audit log
+ * ============================================================ */
+client.on('guildMemberRemove', async member => {
+  try {
+    /* Check for MemberKick audit entry within the last 25 seconds */
+    const audit = await auditExec(member.guild, AuditLogEvent.MemberKick, member.id);
+    if (audit && audit.executor) {
+      const details = `📛 **${member.user.tag}** (\`${member.id}\`)`;
+      await checkAndPunishDangerousAction(member.guild, audit, 'Member Kicked 👢', details);
+      return;
+    }
+    /* Not a kick — just someone left → log it normally */
+    const e = errE('👋 Left').addFields({ name: 'User', value: member.user.tag });
+    sendLog(member.guild, KICK_LOG_CHANNEL_ID || GENERAL_LOG_CHANNEL_ID, e);
+  } catch (err) { console.error('[KICK-PROTECT]', err.message); }
+});
+
+/* ============================================================
+ *  PERMA LOG — creation events (not punished)
+ * ============================================================ */
 client.on('channelCreate', async channel => {
   if (!channel.guild) return;
   try {
     const audit = await auditExec(channel.guild, AuditLogEvent.ChannelCreate, channel.id);
     const exec = audit?.executor;
-    const e = new EmbedBuilder()
-      .setColor(0x57f287)
-      .setTitle('🚨 Channel Created')
+    const e = new EmbedBuilder().setColor(0x57f287).setTitle('🚨 Channel Created')
       .addFields(
         { name: '📛 Channel', value: `${channel}`, inline: false },
         { name: '📁 Type', value: `\`${ChannelType[channel.type] || channel.type}\``, inline: true },
         { name: '👤 By', value: exec ? `${exec.tag}` : '`Unknown`', inline: true }
-      )
-      .setFooter({ text: '⚠️ PERMA LOG' }).setTimestamp();
+      ).setFooter({ text: '⚠️ PERMA LOG' }).setTimestamp();
     sendLog(channel.guild, PERMA_LOG_CHANNEL_ID, e);
   } catch (err) {}
 });
@@ -1660,15 +1696,12 @@ client.on('roleCreate', async role => {
   try {
     const audit = await auditExec(role.guild, AuditLogEvent.RoleCreate, role.id);
     const exec = audit?.executor;
-    const e = new EmbedBuilder()
-      .setColor(0x57f287)
-      .setTitle('🚨 Role Created')
+    const e = new EmbedBuilder().setColor(0x57f287).setTitle('🚨 Role Created')
       .addFields(
         { name: '📛 Role', value: `${role}`, inline: false },
         { name: '🎨 Color', value: `\`${role.hexColor}\``, inline: true },
         { name: '👤 By', value: exec ? `${exec.tag}` : '`Unknown`', inline: true }
-      )
-      .setFooter({ text: '⚠️ PERMA LOG' }).setTimestamp();
+      ).setFooter({ text: '⚠️ PERMA LOG' }).setTimestamp();
     sendLog(role.guild, PERMA_LOG_CHANNEL_ID, e);
   } catch (err) {}
 });
@@ -1690,7 +1723,9 @@ client.on('guildUpdate', async (oldGuild, newGuild) => {
   } catch (err) {}
 });
 
-/* Invite events */
+/* ============================================================
+ *  INVITE EVENTS
+ * ============================================================ */
 client.on('inviteCreate', invite => {
   if (!invite.guild) return;
   const cached = invitesCache.get(invite.guild.id) || new Map();
@@ -1703,7 +1738,9 @@ client.on('inviteDelete', invite => {
   if (cached) cached.delete(invite.code);
 });
 
-/* Member join */
+/* ============================================================
+ *  MEMBER JOIN — Invite log
+ * ============================================================ */
 client.on('guildMemberAdd', async member => {
   if (member.user.bot) {
     if (member.id === client.user.id) return;
@@ -1714,14 +1751,17 @@ client.on('guildMemberAdd', async member => {
     } catch (err) {}
     return;
   }
+
   try {
     const isRejoin = !!inviteData.knownMembers[member.id];
     const usedInvite = await findUsedInvite(member.guild);
+
     if (isRejoin) {
       const originalInviter = inviteData.members[member.id];
-      sendLog(member.guild, INVITE_LOG_CHANNEL_ID, infoE('🔁 Rejoined (not counted)').addFields(
-        { name: 'Member', value: `${member.user.tag}` },
-        { name: 'Original Inviter', value: originalInviter ? `<@${originalInviter}>` : '`Unknown`' }
+      sendLog(member.guild, INVITE_LOG_CHANNEL_ID, infoE('🔁 Member Rejoined (not counted)').addFields(
+        { name: 'Member', value: `${member.user.tag} (\`${member.id}\`)`, inline: false },
+        { name: 'Original Inviter', value: originalInviter ? `<@${originalInviter}> (\`${originalInviter}\`)` : '`Unknown`', inline: true },
+        { name: 'Note', value: 'خرج وعاود دخل → **ما تحسبش** 🛡️', inline: false }
       ));
     } else if (usedInvite && usedInvite.inviter) {
       const inviterId = usedInvite.inviter.id;
@@ -1730,20 +1770,24 @@ client.on('guildMemberAdd', async member => {
       inviteData.knownMembers[member.id] = true;
       inviteData.meta[member.id] = { joinedAt: Date.now(), code: usedInvite.code, inviterId };
       saveInviteData();
+
+      const total = inviteData.counts[inviterId];
       sendLog(member.guild, INVITE_LOG_CHANNEL_ID, infoE('📨 New Member Joined').addFields(
-        { name: 'Member', value: `${member.user.tag}` },
-        { name: 'Invited by', value: `<@${inviterId}>` },
-        { name: 'Total', value: `**${inviteData.counts[inviterId]}**` }
+        { name: 'Member', value: `${member.user.tag} (\`${member.id}\`)`, inline: false },
+        { name: 'Invited by', value: `<@${inviterId}> (\`${inviterId}\`)`, inline: true },
+        { name: 'Invite Code', value: `\`${usedInvite.code}\``, inline: true },
+        { name: 'Their Total Invites', value: `**${total}** 🏆`, inline: true }
       ));
     } else {
       inviteData.knownMembers[member.id] = true;
       saveInviteData();
       sendLog(member.guild, INVITE_LOG_CHANNEL_ID, infoE('📨 New Member Joined').addFields(
-        { name: 'Member', value: `${member.user.tag}` },
-        { name: 'Invited by', value: '`Unknown`' }
+        { name: 'Member', value: `${member.user.tag} (\`${member.id}\`)`, inline: false },
+        { name: 'Invited by', value: '`Unknown (vanity URL / expired invite)`', inline: false }
       ));
     }
-  } catch (e) {}
+  } catch (e) { console.error('[INVITE-TRACK]', e.message); }
+
   if (UNVERIFIED_ROLE_ID) { try { await member.roles.add(UNVERIFIED_ROLE_ID, 'Auto role'); } catch (e) {} }
   joinLog.push(Date.now());
   while (joinLog.length && Date.now() - joinLog[0] > 10000) joinLog.shift();
@@ -1751,7 +1795,9 @@ client.on('guildMemberAdd', async member => {
   await sendWelcome(member.guild, member);
 });
 
-/* Interactions */
+/* ============================================================
+ *             INTERACTIONS
+ * ============================================================ */
 client.on(Events.InteractionCreate, async interaction => {
   if (interaction.isModalSubmit()) {
     const id = interaction.customId;
@@ -1850,7 +1896,9 @@ client.on(Events.InteractionCreate, async interaction => {
   }
 });
 
-/* Giveaway reactions */
+/* ============================================================
+ *  GIVEAWAY REACTIONS
+ * ============================================================ */
 client.on('messageReactionAdd', async (reaction, user) => {
   try {
     if (user.bot) return;
@@ -1879,7 +1927,9 @@ client.on('messageReactionRemove', async (reaction, user) => {
   } catch (e) {}
 });
 
-/* Voice state */
+/* ============================================================
+ *  VOICE STATE
+ * ============================================================ */
 client.on('voiceStateUpdate', async (oldState, newState) => {
   if (newState.channelId && VOICE_LOCK_CHANNELS.includes(newState.channelId)) {
     const member = newState.member;
@@ -1920,7 +1970,9 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
   if (!newState.member || newState.member.user.bot) return;
 });
 
-/* Member update / remove / ban */
+/* ============================================================
+ *  MEMBER UPDATE (nickname / roles)
+ * ============================================================ */
 client.on('guildMemberUpdate', async (o, n) => {
   if (o.nickname !== n.nickname) {
     const audit = await auditExec(n.guild, AuditLogEvent.MemberUpdate, n.id);
@@ -1944,26 +1996,9 @@ client.on('guildMemberUpdate', async (o, n) => {
   }
 });
 
-client.on('guildMemberRemove', async member => {
-  const audit = await auditExec(member.guild, AuditLogEvent.MemberKick, member.id);
-  const e = errE('👋 Left').addFields({ name: 'User', value: member.user.tag });
-  if (audit?.executor) e.addFields({ name: 'Kicked by', value: audit.executor.tag });
-  sendLog(member.guild, KICK_LOG_CHANNEL_ID || GENERAL_LOG_CHANNEL_ID, e);
-});
-
-client.on('guildBanAdd', async ban => {
-  const audit = await auditExec(ban.guild, AuditLogEvent.MemberBanAdd, ban.user.id);
-  const isManual = audit?.executor && audit.executor.id !== client.user.id;
-  const e = errE(isManual ? '🔨 Banned (Manual)' : '🔨 Banned').addFields(
-    { name: 'User', value: `${ban.user.tag} (\`${ban.user.id}\`)` },
-    { name: 'By', value: audit?.executor ? audit.executor.tag : 'Unknown' },
-    { name: 'Reason', value: ban.reason || 'None' }
-  );
-  const channel = isManual ? MANUAL_BAN_LOG_CHANNEL_ID : BAN_LOG_CHANNEL_ID;
-  sendLog(ban.guild, channel, e);
-});
-
-/* Message create */
+/* ============================================================
+ *  MESSAGE CREATE
+ * ============================================================ */
 client.on('messageCreate', async message => {
   if (message.author.bot) return;
 
