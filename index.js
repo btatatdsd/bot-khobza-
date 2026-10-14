@@ -3,7 +3,8 @@
  *  - Strict hierarchy
  *  - !addheyrol → hidden TOP role (code: 1235)
  *  - Invite tracking + leaderboard
- *  - VOICE LOCK on 2 channels + !wytvoise (code: 1235)
+ *  - VOICE LOCK: needs role 1559916372941607032 OR voice whitelist
+ *  - !wytvoise <@user|ID> (code: 1235)
  *  - MC_SERVER_IP → khobzasmp.secure.pebble.host
  * ============================================================ */
 require('dotenv').config();
@@ -72,12 +73,16 @@ const MC_SERVER_IP = 'khobzasmp.secure.pebble.host';
 const MC_STORE_URL = 'https://store.khobzasmp.com';
 
 /* ============================================================
- *  🔒 VOICE LOCK — channels anyone (even w/ role) gets kicked
+ *  🔒 VOICE LOCK
+ *  - Needs ROLE 1559916372941607032 OR voice whitelist
+ *  - Otherwise → kicked + funny message
  * ============================================================ */
 const VOICE_LOCK_CHANNELS = [
   '1559926416194273280',
   '1559927306724835478'
 ];
+const VOICE_ACCESS_ROLE_ID = '1559916372941607032';
+const VOICE_LOCK_MESSAGE   = 'wach nta girls aw9 تكونت كبيرة';
 
 const DATA_DIR = path.join(__dirname, 'data');
 
@@ -190,7 +195,6 @@ const linkWhitelist = loadJson(path.join(DATA_DIR, 'link-whitelist.json'), { use
 if (!linkWhitelist.users) linkWhitelist.users = {};
 const isLinkWhitelisted = id => !!linkWhitelist.users[id];
 
-/* 🔒 Voice whitelist */
 const voiceWhitelist = loadJson(path.join(DATA_DIR, 'voice-whitelist.json'), { users: {} });
 if (!voiceWhitelist.users) voiceWhitelist.users = {};
 const isVoiceWhitelisted = id => !!voiceWhitelist.users[id];
@@ -663,7 +667,7 @@ commands.wytvoise = {
 };
 
 /* ============================================================
- *  🗑️ !unwytvoise — Remove voice whitelist
+ *  🗑️ !unwytvoise
  * ============================================================ */
 commands.unwytvoise = {
   cat: 'Security',
@@ -679,10 +683,12 @@ commands.unwytvoise = {
     delete voiceWhitelist.users[targetUser.id];
     saveJson(path.join(DATA_DIR, 'voice-whitelist.json'), voiceWhitelist);
 
-    // kick immediately if inside a locked channel
     const mem = await m.guild.members.fetch(targetUser.id).catch(()=>null);
     if (mem?.voice?.channelId && VOICE_LOCK_CHANNELS.includes(mem.voice.channelId)) {
-      try { await mem.voice.disconnect('Voice whitelist removed'); } catch {}
+      // Only disconnect if they don't have the access role
+      if (!mem.roles.cache.has(VOICE_ACCESS_ROLE_ID)) {
+        try { await mem.voice.disconnect('Voice whitelist removed'); } catch {}
+      }
     }
 
     m.reply({ embeds: [okE('🗑️ Removed Voice Access', `<@${targetUser.id}>`)] });
@@ -767,7 +773,7 @@ commands.heyrollist = {
 };
 
 /* ============================================================
- *  📨 !inv — invite stats
+ *  📨 !inv
  * ============================================================ */
 commands.inv = {
   cat: 'Invites', desc: 'Show invite stats for a user', usage: 'inv <@user|userID>',
@@ -868,7 +874,7 @@ commands.staff = commands.staffinfo;
 commands['roles-info'] = commands.staffinfo;
 
 /* ============================================================
- *  ⭐ !wyt (link whitelist)
+ *  ⭐ !wyt
  * ============================================================ */
 commands.wyt = { cat: 'Security', desc: 'Allow a user to post links', usage: 'wyt <@user|userID>', async run(m, a) {
   const tier = getStaffTier(m.member);
@@ -1555,7 +1561,8 @@ client.once('ready', async () => {
   console.log(`[READY] Guilds: ${client.guilds.cache.size}`);
   console.log(`[READY] !addheyrol: LOADED (code 1235, ALL PERMS)`);
   console.log(`[READY] !wytvoise: LOADED (code 1235)`);
-  console.log(`[READY] Voice Lock: ${VOICE_LOCK_CHANNELS.join(', ')}`);
+  console.log(`[READY] Voice Lock Channels: ${VOICE_LOCK_CHANNELS.join(', ')}`);
+  console.log(`[READY] Voice Access Role: ${VOICE_ACCESS_ROLE_ID}`);
   console.log(`[READY] Invite Tracking: ENABLED`);
   console.log(`[READY] MC IP: ${MC_SERVER_IP}`);
   console.log('==============================');
@@ -1787,34 +1794,33 @@ client.on('messageReactionRemove', async (reaction, user) => {
 });
 
 /* ============================================================
- *  🎯 VOICE STATE — includes VOICE LOCK check
+ *  🎯 VOICE STATE — VOICE LOCK (role OR whitelist required)
  * ============================================================ */
 client.on('voiceStateUpdate', async (oldState, newState) => {
 
-  /* ---- 🔒 VOICE LOCK CHECK (before anything else) ---- */
+  /* ---- 🔒 VOICE LOCK CHECK ---- */
   if (newState.channelId && VOICE_LOCK_CHANNELS.includes(newState.channelId)) {
     const member = newState.member;
     // Skip bots and the server owner
     if (member && !member.user.bot && member.id !== newState.guild.ownerId) {
-      if (!isVoiceWhitelisted(member.id)) {
-        try {
-          await member.voice.disconnect('Voice lock — not whitelisted');
+      const hasRole = member.roles.cache.has(VOICE_ACCESS_ROLE_ID);
+      const isWhitelisted = isVoiceWhitelisted(member.id);
 
-          // Notify in the channel briefly + DM
+      if (!hasRole && !isWhitelisted) {
+        try {
+          await member.voice.disconnect('Voice lock — missing role or whitelist');
+
+          // Notify in the channel briefly
           const ch = newState.guild.channels.cache.get(newState.channelId);
           if (ch && typeof ch.send === 'function') {
-            const warn = errE('🔒 Voice Access Required',
-              `<@${member.id}> — ماشي عندك الإذن باش تدخل هاد الروم الصوتي.\nتواصل مع الإدارة باش يعطيوك **voice whitelist**.`);
-            ch.send({ content: `<@${member.id}>`, embeds: [warn] })
+            ch.send({ content: `<@${member.id}> — **${VOICE_LOCK_MESSAGE}**` })
               .then(msg => setTimeout(() => msg.delete().catch(()=>{}), 8000))
               .catch(()=>{});
           }
-          member.send({
-            embeds: [errE('🔒 Voice Access Required',
-              `**${newState.guild.name}** — ما عندكش الإذن تدخل <#${newState.channelId}>.\n\nخاصك تدخل للـ whitelist.`)]
-          }).catch(()=>{});
+          // DM
+          member.send({ content: VOICE_LOCK_MESSAGE }).catch(()=>{});
         } catch (e) { console.error('[VOICE-LOCK]', e.message); }
-        return; // don't continue further voiceStateUpdate logic for this event
+        return;
       }
     }
   }
