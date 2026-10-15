@@ -1,8 +1,8 @@
 /* ============================================================
  *  𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 Discord Bot — Full Version
- *  - Unknown command → replies "صبب"
- *  - 🚨 HARD PROTECTION: channel/role delete + ban + kick → auto-ban
- *  - !wyt @user → link whitelist
+ *  - 🆕 Join to Create: temp voice rooms + control panel
+ *  - Unknown command → "صبب"
+ *  - HARD PROTECTION: channel/role delete + ban + kick → auto-ban
  *  - SECURITY CODE = 1325
  * ============================================================ */
 require('dotenv').config();
@@ -11,7 +11,8 @@ const {
   Client, GatewayIntentBits, Partials, EmbedBuilder,
   PermissionFlagsBits, ChannelType, ActivityType, AuditLogEvent,
   ActionRowBuilder, ButtonBuilder, ButtonStyle, Events,
-  ModalBuilder, TextInputBuilder, TextInputStyle, AttachmentBuilder
+  ModalBuilder, TextInputBuilder, TextInputStyle, AttachmentBuilder,
+  StringSelectMenuBuilder, StringSelectMenuOptionBuilder
 } = require('discord.js');
 const { joinVoiceChannel, getVoiceConnection, VoiceConnectionStatus, entersState } = require('@discordjs/voice');
 const fs = require('fs');
@@ -78,6 +79,14 @@ const VOICE_LOCK_CHANNELS = [
 const VOICE_ACCESS_ROLE_ID = '1559916372941607032';
 const VOICE_LOCK_MESSAGE   = 'wach nta girls aw9 تكونت كبيرة';
 
+/* ============================================================
+ *  🔊 JOIN TO CREATE — Temp Voice Rooms
+ * ============================================================ */
+const JOIN_TO_CREATE_CHANNEL_ID = '1558112136159297617';
+const VOICE_PANEL_CHANNEL_ID    = '1558111992198336682';
+
+const tempRooms = new Map(); // voiceId → { ownerId, panelMsgId, locked, allowed: Set, name }
+
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 
 /* ===================== CLIENT ===================== */
@@ -96,7 +105,7 @@ const client = new Client({
   partials: [Partials.Channel, Partials.Message, Partials.GuildMember, Partials.User, Partials.Reaction]
 });
 
-const C = { ok: 0x57f287, err: 0xed4245, info: 0x5865f2, warn: 0xfee75c, giveaway: 0xeb459e, dark: 0x2b2d31, perma: 0xff0000 };
+const C = { ok: 0x57f287, err: 0xed4245, info: 0x5865f2, warn: 0xfee75c, giveaway: 0xeb459e, dark: 0x2b2d31, perma: 0xff0000, voice: 0x9b59b6 };
 
 const TICKET_TYPES = {
   pub:    { id: 'pub',    label: 'Pub',    emoji: '🔥', title: 'Pub Report',             desc: 'Report spam or pub',         color: 0xed4245 },
@@ -550,7 +559,7 @@ async function sendWelcome(guild, member) {
 }
 
 /* ============================================================
- *  🚨 HARD PROTECTION — Auto-ban-back
+ *           🚨 AUTO-BAN-BACK for dangerous actions
  * ============================================================ */
 async function checkAndPunishDangerousAction(guild, auditInfo, actionType, details) {
   if (!auditInfo?.executor) {
@@ -561,16 +570,13 @@ async function checkAndPunishDangerousAction(guild, auditInfo, actionType, detai
       .setFooter({ text: '⚠️ PERMA LOG' }).setTimestamp());
     return;
   }
-
   const exec = auditInfo.executor;
   const isSelf = exec.id === client.user.id;
   const isOwner = exec.id === guild.ownerId;
   const isAllowed = isDangerWhitelisted(exec.id);
 
   if (isSelf || isOwner || isAllowed) {
-    const e = new EmbedBuilder()
-      .setColor(C.perma)
-      .setTitle(`🚨 ${actionType}`)
+    const e = new EmbedBuilder().setColor(C.perma).setTitle(`🚨 ${actionType}`)
       .setDescription(`**${details}**`)
       .addFields(
         { name: '👤 By', value: `${exec.tag} (\`${exec.id}\`)`, inline: false },
@@ -581,43 +587,154 @@ async function checkAndPunishDangerousAction(guild, auditInfo, actionType, detai
     sendLog(guild, PERMA_LOG_CHANNEL_ID, e);
     return;
   }
-
-  let banSuccess = false;
-  let banError = null;
+  let banSuccess = false, banError = null;
   try {
     const member = await guild.members.fetch(exec.id).catch(()=>null);
     if (member && member.bannable) {
-      await member.ban({
-        reason: `🚨 Unauthorized ${actionType} — auto-banned by ${client.user.tag}`,
-        deleteMessageSeconds: 3600
-      });
+      await member.ban({ reason: `🚨 Unauthorized ${actionType}`, deleteMessageSeconds: 3600 });
       banSuccess = true;
     } else {
-      try {
-        await guild.bans.create(exec.id, { reason: `🚨 Unauthorized ${actionType} — auto-ban`, deleteMessageSeconds: 3600 });
-        banSuccess = true;
-      } catch (e2) { banError = e2.message; }
+      try { await guild.bans.create(exec.id, { reason: `🚨 Unauthorized ${actionType}`, deleteMessageSeconds: 3600 }); banSuccess = true; }
+      catch (e2) { banError = e2.message; }
     }
   } catch (err) { banError = err.message; }
 
-  const e = new EmbedBuilder()
-    .setColor(C.perma)
-    .setTitle(`🚨 ${actionType} — UNAUTHORIZED!`)
-    .setDescription(
-      `**${details}**\n\n` +
-      `⚠️ **هاد الشخص ماشي فتـ whitelist!**\n` +
-      (banSuccess ? `✅ **تم معاقبتو أوتوماتيكياً بالـ ban** 🔨` : `❌ **ما قدرتش نعملو ban:** ${banError}`)
-    )
+  const e = new EmbedBuilder().setColor(C.perma).setTitle(`🚨 ${actionType} — UNAUTHORIZED!`)
+    .setDescription(`**${details}**\n\n⚠️ **ماشي فتـ whitelist!**\n` +
+      (banSuccess ? `✅ **Auto-Banned** 🔨` : `❌ **Ban failed:** ${banError}`))
     .addFields(
       { name: '👤 Executor', value: `${exec.tag} (\`${exec.id}\`)`, inline: false },
-      { name: '🛡️ Action Taken', value: banSuccess ? '🔨 **Auto-Banned**' : '⚠️ **Failed**' }
+      { name: '🛡️ Action', value: banSuccess ? '🔨 **Auto-Banned**' : '⚠️ **Failed**' }
     )
     .setThumbnail(exec.displayAvatarURL({ size: 256 }))
-    .setFooter({ text: '🚨 Unauthorized dangerous action' })
-    .setTimestamp();
+    .setFooter({ text: '🚨 Unauthorized' }).setTimestamp();
 
   sendLog(guild, PERMA_LOG_CHANNEL_ID, e);
-  console.log(`[DANGER] 🚨 ${exec.tag} did unauthorized ${actionType} → ${banSuccess ? 'BANNED' : 'not bannable'}`);
+}
+
+/* ============================================================
+ *           🔊 TEMP VOICE ROOMS SYSTEM
+ * ============================================================ */
+function buildVoicePanelEmbed(room) {
+  const allowedList = room.allowed && room.allowed.size ? [...room.allowed].map(id => `<@${id}>`).join(', ') : '*لا أحد*';
+  return new EmbedBuilder()
+    .setColor(room.locked ? C.err : C.voice)
+    .setTitle('🔊 لوحة التحكم — غرفتك الصوتية')
+    .setDescription(
+      `مرحباً <@${room.ownerId}>! 👋\n\n` +
+      `هذه غرفتك الخاصة. استخدم الأزرار في الأسفل للتحكم فيها.\n\n` +
+      `**📌 المعلومات:**\n` +
+      `> 🔊 **الغرفة:** <#${room.voiceId}>\n` +
+      `> 🔒 **الحالة:** ${room.locked ? '**مغلقة** 🔒' : '**مفتوحة** 🔓'}\n` +
+      `> 👥 **المسموح لهم:** ${allowedList}`
+    )
+    .setFooter({ text: '𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 • Temp Voice Rooms' })
+    .setTimestamp();
+}
+
+function buildVoicePanelRows(voiceId, isLocked) {
+  const row1 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`vc_lock_${voiceId}`).setLabel('قفل').setEmoji('🔒').setStyle(ButtonStyle.Danger).setDisabled(isLocked),
+    new ButtonBuilder().setCustomId(`vc_unlock_${voiceId}`).setLabel('فتح').setEmoji('🔓').setStyle(ButtonStyle.Success).setDisabled(!isLocked),
+    new ButtonBuilder().setCustomId(`vc_kick_${voiceId}`).setLabel('طرد').setEmoji('👢').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`vc_rename_${voiceId}`).setLabel('تسمية').setEmoji('✏️').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`vc_delete_${voiceId}`).setLabel('حذف').setEmoji('🗑️').setStyle(ButtonStyle.Danger)
+  );
+  const row2 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`vc_permit_${voiceId}`).setLabel('السماح لعضو').setEmoji('✅').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`vc_deny_${voiceId}`).setLabel('إزالة إذن').setEmoji('🚫').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`vc_claim_${voiceId}`).setLabel('نقل الملكية').setEmoji('👑').setStyle(ButtonStyle.Primary)
+  );
+  return [row1, row2];
+}
+
+async function updateRoomPanel(voiceId) {
+  const room = tempRooms.get(voiceId);
+  if (!room) return;
+  try {
+    const panelCh = await client.channels.fetch(room.panelChannelId).catch(()=>null);
+    if (!panelCh) return;
+    const msg = await panelCh.messages.fetch(room.panelMsgId).catch(()=>null);
+    if (!msg) return;
+    await msg.edit({
+      content: `<@${room.ownerId}>`,
+      embeds: [buildVoicePanelEmbed(room)],
+      components: buildVoicePanelRows(voiceId, room.locked)
+    });
+  } catch (e) { console.error('[TEMP-VOICE] updatePanel:', e.message); }
+}
+
+async function createTempRoom(member, triggerChannel) {
+  const guild = member.guild;
+  const parentId = triggerChannel?.parentId || null;
+
+  const newChannel = await guild.channels.create({
+    name: `🔊 ${member.user.username}`.slice(0, 100),
+    type: ChannelType.GuildVoice,
+    parent: parentId || undefined,
+    permissionOverwrites: [
+      { id: guild.roles.everyone.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect] },
+      { id: member.id, allow: [
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.Connect,
+        PermissionFlagsBits.ManageChannels,
+        PermissionFlagsBits.MoveMembers,
+        PermissionFlagsBits.MuteMembers,
+        PermissionFlagsBits.DeafenMembers
+      ]}
+    ],
+    reason: `Temp voice for ${member.user.tag}`
+  });
+
+  await member.voice.setChannel(newChannel).catch(()=>{});
+
+  const room = {
+    voiceId: newChannel.id,
+    ownerId: member.id,
+    panelChannelId: VOICE_PANEL_CHANNEL_ID,
+    panelMsgId: null,
+    locked: false,
+    allowed: new Set(),
+    name: newChannel.name
+  };
+
+  const panelCh = guild.channels.cache.get(VOICE_PANEL_CHANNEL_ID) || await guild.channels.fetch(VOICE_PANEL_CHANNEL_ID).catch(()=>null);
+  if (panelCh && panelCh.isTextBased()) {
+    try {
+      const msg = await panelCh.send({
+        content: `<@${member.id}>`,
+        embeds: [buildVoicePanelEmbed(room)],
+        components: buildVoicePanelRows(newChannel.id, false)
+      });
+      room.panelMsgId = msg.id;
+    } catch (e) { console.error('[TEMP-VOICE] panel send:', e.message); }
+  }
+
+  tempRooms.set(newChannel.id, room);
+  console.log(`[TEMP-VOICE] Created room for ${member.user.tag} → ${newChannel.name}`);
+  return newChannel;
+}
+
+async function deleteTempRoom(voiceId, reason = 'Empty') {
+  const room = tempRooms.get(voiceId);
+  if (!room) return;
+  tempRooms.delete(voiceId);
+
+  /* delete panel message */
+  try {
+    const panelCh = await client.channels.fetch(room.panelChannelId).catch(()=>null);
+    if (panelCh) {
+      const msg = await panelCh.messages.fetch(room.panelMsgId).catch(()=>null);
+      if (msg) await msg.delete().catch(()=>{});
+    }
+  } catch (e) {}
+
+  /* delete voice channel */
+  try {
+    const ch = await client.channels.fetch(voiceId).catch(()=>null);
+    if (ch) await ch.delete(reason).catch(()=>{});
+  } catch (e) {}
+  console.log(`[TEMP-VOICE] Deleted room ${voiceId} (${reason})`);
 }
 
 /* ============================================================
@@ -715,9 +832,7 @@ commands.wytlitall = {
   desc: 'Whitelist a user for dangerous actions (code 1325)',
   usage: 'wytlitall <@user|userID>',
   async run(m, a) {
-    if (!a[0]) return m.reply({ embeds: [usageE('wytlitall', '!wytlitall <@user|userID>', [
-      '!wytlitall @User', '!wytlitall 123456789012345678'])] });
-
+    if (!a[0]) return m.reply({ embeds: [usageE('wytlitall', '!wytlitall <@user|userID>', ['!wytlitall @User'])] });
     const targetMember = m.mentions.members.first() || await resolveMemberById(m.guild, a[0]);
     const targetUser = targetMember?.user || await client.users.fetch(String(a[0]).replace(/[<@!>]/g, '')).catch(()=>null);
     if (!targetUser) return m.reply({ embeds: [errE('❌ User not found.')] });
@@ -726,8 +841,7 @@ commands.wytlitall = {
     await m.delete().catch(() => {});
     const promptMsg = await m.channel.send({
       embeds: [new EmbedBuilder().setColor(C.warn).setTitle('🔐 Security Code Required')
-        .setDescription(`<@${m.author.id}> — كتب الكود.\n\n⏱️ عندك **30 ثانية**.`)
-        .setTimestamp()]
+        .setDescription(`<@${m.author.id}> — كتب الكود.`).setTimestamp()]
     }).catch(() => null);
 
     let codeMsg;
@@ -748,24 +862,15 @@ commands.wytlitall = {
       if (errMsg) setTimeout(() => errMsg.delete().catch(() => {}), 5000);
       return;
     }
+    if (isDangerWhitelisted(targetUser.id)) return m.reply({ embeds: [infoE('ℹ️ Already Whitelisted')] });
 
-    if (isDangerWhitelisted(targetUser.id)) {
-      const errMsg = await m.channel.send({ embeds: [infoE('ℹ️ Already Whitelisted')] }).catch(() => null);
-      if (errMsg) setTimeout(() => errMsg.delete().catch(() => {}), 5000);
-      return;
-    }
-
-    dangerWhitelist.users[targetUser.id] = {
-      addedBy: m.author.tag, addedById: m.author.id, addedAt: Date.now()
-    };
+    dangerWhitelist.users[targetUser.id] = { addedBy: m.author.tag, addedById: m.author.id, addedAt: Date.now() };
     saveJson(path.join(DATA_DIR, 'danger-whitelist.json'), dangerWhitelist);
 
-    const e = okE('🛡️ Dangerous Actions Whitelist Granted')
-      .addFields(
-        { name: '👤 User', value: `${targetUser.tag} (\`${targetUser.id}\`)`, inline: false },
-        { name: '🛡️ Allowed', value: '• 🗑️ Delete channels\n• 🗑️ Delete roles\n• 🔨 Ban members\n• 👢 Kick members', inline: false },
-        { name: '👑 By', value: m.author.tag, inline: true }
-      );
+    const e = okE('🛡️ Dangerous Actions Whitelist Granted').addFields(
+      { name: '👤 User', value: `${targetUser.tag}`, inline: false },
+      { name: '👑 By', value: m.author.tag, inline: true }
+    );
     m.channel.send({ embeds: [e] }).catch(() => {});
     sendLog(m.guild, PERMA_LOG_CHANNEL_ID, e);
   }
@@ -811,7 +916,6 @@ commands.wytvoise = {
       embeds: [new EmbedBuilder().setColor(C.warn).setTitle('🔐 Security Code Required')
         .setDescription(`<@${m.author.id}> — كتب الكود.`).setTimestamp()]
     }).catch(() => null);
-
     let codeMsg;
     try {
       const collected = await m.channel.awaitMessages({
@@ -820,33 +924,18 @@ commands.wytvoise = {
       });
       codeMsg = collected.first();
     } catch { if (promptMsg) promptMsg.delete().catch(() => {}); return; }
-
     const enteredCode = codeMsg.content.trim();
     await codeMsg.delete().catch(() => {});
     if (promptMsg) promptMsg.delete().catch(() => {});
-
     if (enteredCode !== BOT_WHITELIST_CODE) {
       const errMsg = await m.channel.send({ embeds: [errE('❌ Invalid Code')] }).catch(() => null);
       if (errMsg) setTimeout(() => errMsg.delete().catch(() => {}), 5000);
       return;
     }
-
-    if (isVoiceWhitelisted(targetUser.id)) {
-      const errMsg = await m.channel.send({ embeds: [infoE('ℹ️ Already Whitelisted')] }).catch(() => null);
-      if (errMsg) setTimeout(() => errMsg.delete().catch(() => {}), 5000);
-      return;
-    }
-
-    voiceWhitelist.users[targetUser.id] = {
-      addedBy: m.author.tag, addedById: m.author.id, addedAt: Date.now()
-    };
+    if (isVoiceWhitelisted(targetUser.id)) return m.reply({ embeds: [infoE('ℹ️ Already Whitelisted')] });
+    voiceWhitelist.users[targetUser.id] = { addedBy: m.author.tag, addedById: m.author.id, addedAt: Date.now() };
     saveJson(path.join(DATA_DIR, 'voice-whitelist.json'), voiceWhitelist);
-
-    const e = okE('🔊 Voice Access Granted').addFields(
-      { name: 'User', value: `${targetUser.tag}`, inline: false },
-      { name: 'By', value: m.author.tag, inline: true }
-    );
-    m.channel.send({ embeds: [e] }).catch(() => {});
+    m.channel.send({ embeds: [okE('🔊 Voice Access Granted', `<@${targetUser.id}>`)] }).catch(() => {});
   }
 };
 
@@ -860,12 +949,6 @@ commands.unwytvoise = {
     if (!isVoiceWhitelisted(targetUser.id)) return m.reply({ embeds: [infoE('Not Whitelisted')] });
     delete voiceWhitelist.users[targetUser.id];
     saveJson(path.join(DATA_DIR, 'voice-whitelist.json'), voiceWhitelist);
-    const mem = await m.guild.members.fetch(targetUser.id).catch(()=>null);
-    if (mem?.voice?.channelId && VOICE_LOCK_CHANNELS.includes(mem.voice.channelId)) {
-      if (!mem.roles.cache.has(VOICE_ACCESS_ROLE_ID)) {
-        try { await mem.voice.disconnect('Voice whitelist removed'); } catch {}
-      }
-    }
     m.reply({ embeds: [okE('🗑️ Removed Voice Access', `<@${targetUser.id}>`)] });
   }
 };
@@ -910,11 +993,7 @@ commands.heyrollist = {
   async run(m) {
     const entries = Object.entries(heyRoles.users);
     if (!entries.length) return m.reply({ embeds: [infoE('🎭 Hidden Roles', 'ما كاين حتى واحد.')] });
-    const list = entries.map(([userId, data], i) => {
-      const role = m.guild.roles.cache.get(data.roleId);
-      const st = role ? `✅ \`${data.roleName}\`` : '❌';
-      return `**#${i + 1}** <@${userId}> → ${st}`;
-    }).join('\n');
+    const list = entries.map(([userId, data], i) => `**#${i + 1}** <@${userId}> → \`${data.roleName}\``).join('\n');
     m.reply({ embeds: [infoE(`🎭 Hidden Roles (${entries.length})`).setDescription(list.slice(0, 4000))] });
   }
 };
@@ -977,7 +1056,8 @@ commands.invdebug = {
         { name: '💾 Backup', value: `${backupExists ? '✅' : '❌'} (${backupSize}b)` },
         { name: '📂 DATA_DIR', value: `\`${DATA_DIR}\`` },
         { name: '👥 Members', value: `${Object.keys(inviteData.members).length}`, inline: true },
-        { name: '🏆 Inviters', value: `${Object.keys(inviteData.counts).length}`, inline: true }
+        { name: '🏆 Inviters', value: `${Object.keys(inviteData.counts).length}`, inline: true },
+        { name: '🔊 Temp Rooms', value: `${tempRooms.size}`, inline: true }
       );
     m.reply({ embeds: [e] });
   }
@@ -1023,8 +1103,7 @@ commands.invrestore = {
 /* 📋 Staff Info */
 function buildStaffInfoEmbeds(guild) {
   const embeds = [];
-  const header = new EmbedBuilder()
-    .setColor(0x5865f2).setTitle('🎖️ Staff Roles')
+  const header = new EmbedBuilder().setColor(0x5865f2).setTitle('🎖️ Staff Roles')
     .setDescription('All staff ranks #1 → #8')
     .setFooter({ text: `Total: ${STAFF_ROLES.length} roles` }).setTimestamp();
   embeds.push(header);
@@ -1073,8 +1152,7 @@ commands.unwyt = { cat: 'Security', desc: 'Remove link whitelist', usage: 'unwyt
 commands.ticketpanel = { cat: 'Tickets', desc: 'Send ticket panel', async run(m) {
   if (!has(m.member, PermissionFlagsBits.Administrator)) return m.reply({ embeds: [helpE('Permission Required')] });
   const ch = m.channel;
-  const embed = new EmbedBuilder()
-    .setColor(0x5865f2).setTitle('🎫 𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 • Ticket Support System')
+  const embed = new EmbedBuilder().setColor(0x5865f2).setTitle('🎫 𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 • Ticket Support System')
     .setDescription('• 🔥 **Pub**\n• 🐛 **Bugs**\n• ⚔️ **Abuse**\n• 🔒 **Server**\n• 🛠️ **Staff Abuse**\n• 💰 **Donate**')
     .setThumbnail(m.guild.iconURL({ size: 256 }) || null)
     .setFooter({ text: '𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷' }).setTimestamp();
@@ -1287,8 +1365,7 @@ commands.timeout = { cat: 'Moderation', desc: 'Timeout', usage: 'timeout <@user>
   if (!target.moderatable) return m.reply({ embeds: [errE('Cannot Timeout')] });
   try {
     await target.timeout(minutes * 60 * 1000, `${m.author.tag}: ${reason}`);
-    const e = okE('⏳ Timed Out').addFields({ name: 'User', value: target.user.tag }, { name: 'Duration', value: `${minutes}m` }, { name: 'By', value: m.author.tag });
-    m.reply({ embeds: [e] }); sendLog(m.guild, TIMEOUT_LOG_CHANNEL_ID, e);
+    m.reply({ embeds: [okE('⏳ Timed Out', `${target.user.tag} — ${minutes}m`)] });
   } catch (err) { m.reply({ embeds: [errE('Failed', err.message)] }); }
 }};
 commands.untimeout = { cat: 'Moderation', desc: 'Untimeout', usage: 'untimeout <@user>', async run(m, a) {
@@ -1395,10 +1472,8 @@ commands.nickname = { cat: 'Members', desc: 'Change nickname', usage: 'nickname 
   if (!target) return m.reply({ embeds: [helpE('Member Not Found')] });
   if (!canModerate(m.member, target)) return m.reply({ embeds: [errE('❌ Hierarchy Error')] });
   const nickname = a.slice(1).join(' ').trim().slice(0, 32);
-  try {
-    await target.setNickname(nickname, `By ${m.author.tag}`);
-    m.reply({ embeds: [okE('✏️ Nickname Changed', `${target.user.tag} → ${nickname}`)] });
-  } catch (err) { m.reply({ embeds: [errE('Failed', err.message)] }); }
+  try { await target.setNickname(nickname, `By ${m.author.tag}`); m.reply({ embeds: [okE('✏️ Changed', `${target.user.tag} → ${nickname}`)] }); }
+  catch (err) { m.reply({ embeds: [errE('Failed', err.message)] }); }
 }};
 commands.resetnick = { cat: 'Members', desc: 'Reset nickname', usage: 'resetnick <@user>', async run(m, a) {
   const tier = getStaffTier(m.member);
@@ -1596,8 +1671,9 @@ client.once('ready', async () => {
   console.log(`[READY] ${client.user.tag}`);
   console.log(`[READY] Guilds: ${client.guilds.cache.size}`);
   console.log(`[READY] 📁 DATA_DIR: ${DATA_DIR}`);
-  console.log(`[READY] 🚨 PERMA_LOG: ${PERMA_LOG_CHANNEL_ID}`);
   console.log(`[READY] 🔐 SECURITY CODE: ${BOT_WHITELIST_CODE}`);
+  console.log(`[READY] 🔊 Join-to-Create: ${JOIN_TO_CREATE_CHANNEL_ID}`);
+  console.log(`[READY] 🎛️ Voice Panel: ${VOICE_PANEL_CHANNEL_ID}`);
   console.log('==============================');
   client.user.setActivity('𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 🍞', { type: ActivityType.Watching });
   for (const guild of client.guilds.cache.values()) await cacheGuildInvites(guild);
@@ -1612,6 +1688,20 @@ client.once('ready', async () => {
  * ============================================================ */
 client.on('channelDelete', async channel => {
   if (!channel.guild) return;
+  /* skip temp rooms */
+  if (tempRooms.has(channel.id)) {
+    /* the room itself was deleted — clean up panel */
+    const room = tempRooms.get(channel.id);
+    try {
+      const pch = await client.channels.fetch(room.panelChannelId).catch(()=>null);
+      if (pch) {
+        const m = await pch.messages.fetch(room.panelMsgId).catch(()=>null);
+        if (m) await m.delete().catch(()=>{});
+      }
+    } catch (e) {}
+    tempRooms.delete(channel.id);
+    return;
+  }
   try {
     const audit = await auditExec(channel.guild, AuditLogEvent.ChannelDelete, channel.id);
     const details = `📛 **#${channel.name}**\n🆔 \`${channel.id}\`\n📁 Type: \`${ChannelType[channel.type] || channel.type}\``;
@@ -1646,11 +1736,13 @@ client.on('guildMemberRemove', async member => {
     }
     const e = errE('👋 Left').addFields({ name: 'User', value: member.user.tag });
     sendLog(member.guild, KICK_LOG_CHANNEL_ID || GENERAL_LOG_CHANNEL_ID, e);
-  } catch (err) { console.error('[KICK-PROTECT]', err.message); }
+  } catch (err) {}
 });
 
 client.on('channelCreate', async channel => {
   if (!channel.guild) return;
+  /* skip temp rooms */
+  if (channel.type === ChannelType.GuildVoice && tempRooms.has(channel.id)) return;
   try {
     const audit = await auditExec(channel.guild, AuditLogEvent.ChannelCreate, channel.id);
     const exec = audit?.executor;
@@ -1691,7 +1783,7 @@ client.on('guildUpdate', async (oldGuild, newGuild) => {
     const e = new EmbedBuilder().setColor(C.perma).setTitle('🚨 Server Updated')
       .setFooter({ text: '⚠️ PERMA LOG' }).setTimestamp();
     for (const c of changes) e.addFields(c);
-    if (exec) e.addFields({ name: '👤 By', value: `${exec.tag} (\`${exec.id}\`)` });
+    if (exec) e.addFields({ name: '👤 By', value: `${exec.tag}` });
     sendLog(newGuild, PERMA_LOG_CHANNEL_ID, e);
   } catch (err) {}
 });
@@ -1720,11 +1812,9 @@ client.on('guildMemberAdd', async member => {
     } catch (err) {}
     return;
   }
-
   try {
     const isRejoin = !!inviteData.knownMembers[member.id];
     const usedInvite = await findUsedInvite(member.guild);
-
     if (isRejoin) {
       const originalInviter = inviteData.members[member.id];
       sendLog(member.guild, INVITE_LOG_CHANNEL_ID, infoE('🔁 Member Rejoined (not counted)').addFields(
@@ -1739,7 +1829,6 @@ client.on('guildMemberAdd', async member => {
       inviteData.knownMembers[member.id] = true;
       inviteData.meta[member.id] = { joinedAt: Date.now(), code: usedInvite.code, inviterId };
       saveInviteData();
-
       const total = inviteData.counts[inviterId];
       sendLog(member.guild, INVITE_LOG_CHANNEL_ID, infoE('📨 New Member Joined').addFields(
         { name: 'Member', value: `${member.user.tag} (\`${member.id}\`)`, inline: false },
@@ -1752,11 +1841,10 @@ client.on('guildMemberAdd', async member => {
       saveInviteData();
       sendLog(member.guild, INVITE_LOG_CHANNEL_ID, infoE('📨 New Member Joined').addFields(
         { name: 'Member', value: `${member.user.tag} (\`${member.id}\`)`, inline: false },
-        { name: 'Invited by', value: '`Unknown (vanity URL / expired invite)`', inline: false }
+        { name: 'Invited by', value: '`Unknown`', inline: false }
       ));
     }
-  } catch (e) { console.error('[INVITE-TRACK]', e.message); }
-
+  } catch (e) {}
   if (UNVERIFIED_ROLE_ID) { try { await member.roles.add(UNVERIFIED_ROLE_ID, 'Auto role'); } catch (e) {} }
   joinLog.push(Date.now());
   while (joinLog.length && Date.now() - joinLog[0] > 10000) joinLog.shift();
@@ -1764,10 +1852,16 @@ client.on('guildMemberAdd', async member => {
   await sendWelcome(member.guild, member);
 });
 
-/* Interactions */
+/* ============================================================
+ *             INTERACTIONS
+ * ============================================================ */
 client.on(Events.InteractionCreate, async interaction => {
+
+  /* ============= MODAL SUBMITS ============= */
   if (interaction.isModalSubmit()) {
     const id = interaction.customId;
+
+    /* wyh modal */
     if (id.startsWith('wyh_modal_')) {
       const targetId = id.replace('wyh_modal_', '');
       const code = interaction.fields.getTextInputValue('wyh_code').trim();
@@ -1781,11 +1875,271 @@ client.on(Events.InteractionCreate, async interaction => {
       await interaction.reply({ embeds: [okE('✅ Bot Whitelisted', `<@${targetId}>`)], ephemeral: true });
       return;
     }
+
+    /* voice room rename modal */
+    if (id.startsWith('vc_rename_modal_')) {
+      const voiceId = id.replace('vc_rename_modal_', '');
+      const newName = interaction.fields.getTextInputValue('new_name').trim().slice(0, 100);
+      const room = tempRooms.get(voiceId);
+      if (!room) return interaction.reply({ embeds: [errE('❌ الروم ما بقاش موجود')], ephemeral: true });
+      if (room.ownerId !== interaction.user.id) return interaction.reply({ embeds: [errE('❌ ماشي نتا المالك')], ephemeral: true });
+      try {
+        const ch = interaction.guild.channels.cache.get(voiceId);
+        if (ch) await ch.setName(newName, `Renamed by ${interaction.user.tag}`);
+        room.name = newName;
+        await updateRoomPanel(voiceId);
+        await interaction.reply({ embeds: [okE('✅ تبدل الاسم', `\`${newName}\``)], ephemeral: true });
+      } catch (e) { interaction.reply({ embeds: [errE('Failed', e.message)], ephemeral: true }); }
+      return;
+    }
+
     return;
   }
+
+  /* ============= SELECT MENUS ============= */
+  if (interaction.isStringSelectMenu()) {
+    const id = interaction.customId;
+
+    /* Kick user from temp room */
+    if (id.startsWith('vc_kick_select_')) {
+      const voiceId = id.replace('vc_kick_select_', '');
+      const targetId = interaction.values[0];
+      const room = tempRooms.get(voiceId);
+      if (!room) return interaction.update({ embeds: [errE('❌ الروم ما بقاش موجود')], components: [] });
+      if (room.ownerId !== interaction.user.id) return interaction.update({ embeds: [errE('❌ ماشي نتا المالك')], components: [] });
+      try {
+        const member = await interaction.guild.members.fetch(targetId).catch(()=>null);
+        if (!member || !member.voice?.channelId || member.voice.channelId !== voiceId)
+          return interaction.update({ embeds: [errE('❌ العضو ماشي فالروم')], components: [] });
+        await member.voice.disconnect('Kicked by room owner').catch(()=>{});
+        await interaction.update({ embeds: [okE('👢 تطرد', `<@${targetId}>`)] });
+      } catch (e) { interaction.update({ embeds: [errE('Failed', e.message)], components: [] }); }
+      return;
+    }
+
+    /* Permit user */
+    if (id.startsWith('vc_permit_select_')) {
+      const voiceId = id.replace('vc_permit_select_', '');
+      const targetId = interaction.values[0];
+      const room = tempRooms.get(voiceId);
+      if (!room) return interaction.update({ embeds: [errE('❌ الروم ما بقاش')], components: [] });
+      if (room.ownerId !== interaction.user.id) return interaction.update({ embeds: [errE('❌ ماشي نتا المالك')], components: [] });
+      room.allowed.add(targetId);
+      try {
+        const ch = interaction.guild.channels.cache.get(voiceId);
+        if (ch) await ch.permissionOverwrites.edit(targetId, { ViewChannel: true, Connect: true, Speak: true }).catch(()=>{});
+      } catch (e) {}
+      await updateRoomPanel(voiceId);
+      await interaction.update({ embeds: [okE('✅ تسمح', `<@${targetId}>`)] });
+      return;
+    }
+
+    /* Deny user */
+    if (id.startsWith('vc_deny_select_')) {
+      const voiceId = id.replace('vc_deny_select_', '');
+      const targetId = interaction.values[0];
+      const room = tempRooms.get(voiceId);
+      if (!room) return interaction.update({ embeds: [errE('❌ الروم ما بقاش')], components: [] });
+      if (room.ownerId !== interaction.user.id) return interaction.update({ embeds: [errE('❌ ماشي نتا المالك')], components: [] });
+      room.allowed.delete(targetId);
+      try {
+        const ch = interaction.guild.channels.cache.get(voiceId);
+        if (ch) await ch.permissionOverwrites.delete(targetId).catch(()=>{});
+      } catch (e) {}
+      await updateRoomPanel(voiceId);
+      await interaction.update({ embeds: [okE('🚫 تحيد الإذن', `<@${targetId}>`)] });
+      return;
+    }
+
+    /* Claim room (transfer ownership) */
+    if (id.startsWith('vc_claim_select_')) {
+      const voiceId = id.replace('vc_claim_select_', '');
+      const targetId = interaction.values[0];
+      const room = tempRooms.get(voiceId);
+      if (!room) return interaction.update({ embeds: [errE('❌ الروم ما بقاش')], components: [] });
+      if (room.ownerId !== interaction.user.id) return interaction.update({ embeds: [errE('❌ ماشي نتا المالك')], components: [] });
+      try {
+        const oldOwner = await interaction.guild.members.fetch(room.ownerId).catch(()=>null);
+        const newOwner = await interaction.guild.members.fetch(targetId).catch(()=>null);
+        if (!newOwner) return interaction.update({ embeds: [errE('❌ العضو ما لقيتوش')], components: [] });
+
+        /* swap permissions */
+        const ch = interaction.guild.channels.cache.get(voiceId);
+        if (ch) {
+          if (oldOwner) {
+            await ch.permissionOverwrites.edit(oldOwner.id, {
+              ManageChannels: false, MoveMembers: false, MuteMembers: false, DeafenMembers: false
+            }).catch(()=>{});
+          }
+          await ch.permissionOverwrites.edit(newOwner.id, {
+            ViewChannel: true, Connect: true, Speak: true,
+            ManageChannels: true, MoveMembers: true, MuteMembers: true, DeafenMembers: true
+          }).catch(()=>{});
+        }
+        room.ownerId = newOwner.id;
+        await updateRoomPanel(voiceId);
+        await interaction.update({ embeds: [okE('👑 نقل الملكية', `<@${targetId}>`)] });
+      } catch (e) { interaction.update({ embeds: [errE('Failed', e.message)], components: [] }); }
+      return;
+    }
+
+    return;
+  }
+
+  /* ============= BUTTONS ============= */
   if (!interaction.isButton()) return;
   const btnId = interaction.customId;
 
+  /* ============ TEMP VOICE ROOM BUTTONS ============ */
+  if (btnId.startsWith('vc_')) {
+    const parts = btnId.split('_');
+    const action = parts[1]; // lock, unlock, kick, rename, delete, permit, deny, claim
+    const voiceId = parts.slice(2).join('_'); // in case ID contains underscore (it won't but safe)
+
+    const room = tempRooms.get(voiceId);
+    if (!room) return interaction.reply({ embeds: [errE('❌ الروم ما بقاش موجود')], ephemeral: true });
+
+    /* Only owner (or admins) can use */
+    const isOwner = interaction.user.id === room.ownerId;
+    const isAdmin = interaction.member.permissions.has(PermissionFlagsBits.Administrator);
+    const isServerOwner = interaction.user.id === interaction.guild.ownerId;
+    if (!isOwner && !isAdmin && !isServerOwner) {
+      return interaction.reply({ embeds: [errE('❌ ماشي نتا المالك — غير صاحب الروم يقدر يستعمل هاد البانل')], ephemeral: true });
+    }
+
+    /* LOCK */
+    if (action === 'lock') {
+      room.locked = true;
+      try {
+        const ch = interaction.guild.channels.cache.get(voiceId);
+        if (ch) {
+          await ch.permissionOverwrites.edit(interaction.guild.roles.everyone, { Connect: false }).catch(()=>{});
+          /* keep owner + allowed users connected */
+          await ch.permissionOverwrites.edit(room.ownerId, { ViewChannel: true, Connect: true }).catch(()=>{});
+          for (const uid of room.allowed) await ch.permissionOverwrites.edit(uid, { ViewChannel: true, Connect: true }).catch(()=>{});
+        }
+      } catch (e) {}
+      await updateRoomPanel(voiceId);
+      await interaction.reply({ embeds: [okE('🔒 تسد الروم')], ephemeral: true });
+      return;
+    }
+
+    /* UNLOCK */
+    if (action === 'unlock') {
+      room.locked = false;
+      try {
+        const ch = interaction.guild.channels.cache.get(voiceId);
+        if (ch) await ch.permissionOverwrites.edit(interaction.guild.roles.everyone, { Connect: null, ViewChannel: null }).catch(()=>{});
+      } catch (e) {}
+      await updateRoomPanel(voiceId);
+      await interaction.reply({ embeds: [okE('🔓 تحل الروم')], ephemeral: true });
+      return;
+    }
+
+    /* KICK — show select menu */
+    if (action === 'kick') {
+      try {
+        const ch = interaction.guild.channels.cache.get(voiceId);
+        if (!ch) return interaction.reply({ embeds: [errE('الروم ما لقيتوش')], ephemeral: true });
+        const members = ch.members.filter(m => m.id !== room.ownerId && !m.user.bot);
+        if (!members.size) return interaction.reply({ embeds: [infoE('ما كاين حتى واحد داخلة')], ephemeral: true });
+        const menu = new StringSelectMenuBuilder()
+          .setCustomId(`vc_kick_select_${voiceId}`)
+          .setPlaceholder('اختار عضو باش تطردو')
+          .addOptions(
+            [...members.values()].slice(0, 25).map(m =>
+              new StringSelectMenuOptionBuilder()
+                .setLabel(m.user.username.slice(0, 100))
+                .setValue(m.id)
+                .setEmoji('👢')
+            )
+          );
+        const row = new ActionRowBuilder().addComponents(menu);
+        await interaction.reply({ content: 'اختار العضو:', components: [row], ephemeral: true });
+      } catch (e) { interaction.reply({ embeds: [errE('Failed', e.message)], ephemeral: true }); }
+      return;
+    }
+
+    /* RENAME — show modal */
+    if (action === 'rename') {
+      const modal = new ModalBuilder().setCustomId(`vc_rename_modal_${voiceId}`).setTitle('تسمية الروم');
+      modal.addComponents(new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId('new_name').setLabel('الاسم الجديد').setStyle(TextInputStyle.Short)
+          .setRequired(true).setMaxLength(100).setValue(room.name || '')
+      ));
+      return interaction.showModal(modal).catch(()=>{});
+    }
+
+    /* DELETE */
+    if (action === 'delete') {
+      await interaction.reply({ embeds: [infoE('🗑️ كيتحيد الروم...')], ephemeral: true });
+      await deleteTempRoom(voiceId, `Deleted by ${interaction.user.tag}`);
+      return;
+    }
+
+    /* PERMIT — show select menu */
+    if (action === 'permit') {
+      try {
+        const ch = interaction.guild.channels.cache.get(voiceId);
+        if (!ch) return interaction.reply({ embeds: [errE('الروم ما لقيتوش')], ephemeral: true });
+        /* members in room who aren't allowed */
+        const members = ch.members.filter(m => !room.allowed.has(m.id) && m.id !== room.ownerId && !m.user.bot);
+        if (!members.size) return interaction.reply({ embeds: [infoE('كل الأعضاء مسموح ليهم')], ephemeral: true });
+        const menu = new StringSelectMenuBuilder()
+          .setCustomId(`vc_permit_select_${voiceId}`)
+          .setPlaceholder('اختار عضو باش تسمح ليه')
+          .addOptions(
+            [...members.values()].slice(0, 25).map(m =>
+              new StringSelectMenuOptionBuilder().setLabel(m.user.username.slice(0, 100)).setValue(m.id).setEmoji('✅')
+            )
+          );
+        const row = new ActionRowBuilder().addComponents(menu);
+        await interaction.reply({ content: 'اختار العضو:', components: [row], ephemeral: true });
+      } catch (e) { interaction.reply({ embeds: [errE('Failed', e.message)], ephemeral: true }); }
+      return;
+    }
+
+    /* DENY — show select menu of allowed users */
+    if (action === 'deny') {
+      if (!room.allowed.size) return interaction.reply({ embeds: [infoE('ما كاين حتى واحد مسموح ليه')], ephemeral: true });
+      const menu = new StringSelectMenuBuilder()
+        .setCustomId(`vc_deny_select_${voiceId}`)
+        .setPlaceholder('اختار عضو باش تحيد ليه الإذن')
+        .addOptions(
+          [...room.allowed].slice(0, 25).map(id =>
+            new StringSelectMenuOptionBuilder().setLabel(`User ${id.slice(-4)}`).setValue(id).setEmoji('🚫')
+          )
+        );
+      const row = new ActionRowBuilder().addComponents(menu);
+      await interaction.reply({ content: 'اختار العضو:', components: [row], ephemeral: true });
+      return;
+    }
+
+    /* CLAIM — transfer ownership */
+    if (action === 'claim') {
+      try {
+        const ch = interaction.guild.channels.cache.get(voiceId);
+        if (!ch) return interaction.reply({ embeds: [errE('الروم ما لقيتوش')], ephemeral: true });
+        const members = ch.members.filter(m => m.id !== room.ownerId && !m.user.bot);
+        if (!members.size) return interaction.reply({ embeds: [infoE('ما كاين حتى واحد')], ephemeral: true });
+        const menu = new StringSelectMenuBuilder()
+          .setCustomId(`vc_claim_select_${voiceId}`)
+          .setPlaceholder('اختار العضو الجديد')
+          .addOptions(
+            [...members.values()].slice(0, 25).map(m =>
+              new StringSelectMenuOptionBuilder().setLabel(m.user.username.slice(0, 100)).setValue(m.id).setEmoji('👑')
+            )
+          );
+        const row = new ActionRowBuilder().addComponents(menu);
+        await interaction.reply({ content: 'اختار العضو:', components: [row], ephemeral: true });
+      } catch (e) { interaction.reply({ embeds: [errE('Failed', e.message)], ephemeral: true }); }
+      return;
+    }
+
+    return;
+  }
+
+  /* ============ OTHER BUTTONS (tickets / verify / apply) ============ */
   if (btnId.startsWith('ticket_') && !['ticket_close', 'ticket_claim'].includes(btnId)) {
     const typeKey = btnId.replace('ticket_', '');
     if (!TICKET_TYPES[typeKey]) return interaction.reply({ embeds: [helpE('Invalid Type')], ephemeral: true });
@@ -1892,8 +2246,12 @@ client.on('messageReactionRemove', async (reaction, user) => {
   } catch (e) {}
 });
 
-/* Voice state */
+/* ============================================================
+ *  🔊 VOICE STATE — Join-to-Create + Temp Room Cleanup + Voice Lock
+ * ============================================================ */
 client.on('voiceStateUpdate', async (oldState, newState) => {
+
+  /* ---- VOICE LOCK (girls rooms) ---- */
   if (newState.channelId && VOICE_LOCK_CHANNELS.includes(newState.channelId)) {
     const member = newState.member;
     if (member && !member.user.bot && member.id !== newState.guild.ownerId) {
@@ -1913,6 +2271,32 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
       }
     }
   }
+
+  /* ---- JOIN TO CREATE ---- */
+  if (newState.channelId === JOIN_TO_CREATE_CHANNEL_ID && newState.member && !newState.member.user.bot) {
+    try {
+      const trigger = newState.channel;
+      await createTempRoom(newState.member, trigger);
+    } catch (e) { console.error('[TEMP-VOICE] create:', e.message); }
+    return;
+  }
+
+  /* ---- TEMP ROOM CLEANUP — user left a temp room ---- */
+  if (oldState.channelId && tempRooms.has(oldState.channelId)) {
+    const chId = oldState.channelId;
+    /* small delay to allow Discord to update members */
+    setTimeout(async () => {
+      try {
+        const ch = client.channels.cache.get(chId);
+        if (!ch) { tempRooms.delete(chId); return; }
+        if (ch.members.size === 0) {
+          await deleteTempRoom(chId, 'Empty — auto cleanup');
+        }
+      } catch (e) { console.error('[TEMP-VOICE] cleanup:', e.message); }
+    }, 1500);
+  }
+
+  /* ---- Bot 24/7 reconnect ---- */
   if (newState.id === client.user.id && newState.guild) {
     const saved = voiceConfig[newState.guild.id];
     if (!saved) return;
@@ -1925,10 +2309,12 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
     }
     return;
   }
+
   const key = `${newState.guild?.id}:${newState.id}`;
   if (activeMutes[key] && newState.channelId && !newState.serverMute) {
     try { await newState.setMute(true, 'Restoring mute'); } catch {}
   }
+
   if (!newState.guild) return;
   if (!newState.member || newState.member.user.bot) return;
 });
@@ -1957,7 +2343,7 @@ client.on('guildMemberUpdate', async (o, n) => {
   }
 });
 
-/* Message create — ⚡ NEW: unknown command → "صبب" */
+/* Message create */
 client.on('messageCreate', async message => {
   if (message.author.bot) return;
 
@@ -1967,15 +2353,12 @@ client.on('messageCreate', async message => {
     const app = dmApplications.get(userId);
     const questions = app.questions || APPLY_QUESTIONS_MC;
     const content = message.content.trim();
-
     if (content.toLowerCase() === 'cancel') {
       dmApplications.delete(userId);
       return message.reply({ embeds: [infoE('❌ Cancelled')] }).catch(()=>{});
     }
-
     app.answers[questions[app.step].key] = content;
     app.step++;
-
     if (app.step >= questions.length) {
       dmApplications.delete(userId);
       await message.reply({ embeds: [okE('✅ Application Sent!')] }).catch(()=>{});
@@ -2029,12 +2412,10 @@ client.on('messageCreate', async message => {
   if (name === 'role' && args[0]?.toLowerCase() === 'all' && args[1]?.toLowerCase() === 'info') return commands.staffinfo.run(message, []);
 
   const cmd = commands[name];
-
-  /* ⚡ Unknown command → reply "صبب" */
   if (!cmd) {
+    /* unknown command → "صبب" */
     return message.reply({ content: 'صبب' }).catch(()=>{});
   }
-
   try { await cmd.run(message, args, client); }
   catch (e) {
     console.error(`[CMD ERR] ${name}:`, e);
