@@ -1,6 +1,6 @@
 /* ============================================================
  *  𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 Discord Bot — Full Version
- *  - 🆕 Join to Create: temp voice rooms + control panel
+ *  - 🔊 Join to Create: temp voice rooms + ENGLISH panel INSIDE the voice room's text chat
  *  - Unknown command → "صبب"
  *  - HARD PROTECTION: channel/role delete + ban + kick → auto-ban
  *  - SECURITY CODE = 1325
@@ -81,9 +81,11 @@ const VOICE_LOCK_MESSAGE   = 'wach nta girls aw9 تكونت كبيرة';
 
 /* ============================================================
  *  🔊 JOIN TO CREATE — Temp Voice Rooms
+ *  - Panel is now sent INSIDE the voice room's built-in text chat
+ *  - VOICE_PANEL_CHANNEL_ID no longer used (kept for backward compat)
  * ============================================================ */
 const JOIN_TO_CREATE_CHANNEL_ID = '1558112136159297617';
-const VOICE_PANEL_CHANNEL_ID    = '1558111992198336682';
+const VOICE_PANEL_CHANNEL_ID    = null; // disabled — panel goes inside the voice room's chat
 
 const tempRooms = new Map(); // voiceId → { ownerId, panelMsgId, locked, allowed: Set, name }
 
@@ -564,9 +566,8 @@ async function sendWelcome(guild, member) {
 async function checkAndPunishDangerousAction(guild, auditInfo, actionType, details) {
   if (!auditInfo?.executor) {
     sendLog(guild, PERMA_LOG_CHANNEL_ID, new EmbedBuilder()
-      .setColor(C.warn)
-      .setTitle(`⚠️ ${actionType} — Unknown`)
-      .setDescription(`**${details}**\n\n> ما لقيتش شكون دارها فالـ Audit Log`)
+      .setColor(C.warn).setTitle(`⚠️ ${actionType} — Unknown`)
+      .setDescription(`**${details}**\n\n> Could not find executor in Audit Log`)
       .setFooter({ text: '⚠️ PERMA LOG' }).setTimestamp());
     return;
   }
@@ -600,7 +601,7 @@ async function checkAndPunishDangerousAction(guild, auditInfo, actionType, detai
   } catch (err) { banError = err.message; }
 
   const e = new EmbedBuilder().setColor(C.perma).setTitle(`🚨 ${actionType} — UNAUTHORIZED!`)
-    .setDescription(`**${details}**\n\n⚠️ **ماشي فتـ whitelist!**\n` +
+    .setDescription(`**${details}**\n\n⚠️ **Not in whitelist!**\n` +
       (banSuccess ? `✅ **Auto-Banned** 🔨` : `❌ **Ban failed:** ${banError}`))
     .addFields(
       { name: '👤 Executor', value: `${exec.tag} (\`${exec.id}\`)`, inline: false },
@@ -613,20 +614,24 @@ async function checkAndPunishDangerousAction(guild, auditInfo, actionType, detai
 }
 
 /* ============================================================
- *           🔊 TEMP VOICE ROOMS SYSTEM
+ *           🔊 TEMP VOICE ROOMS SYSTEM — ENGLISH PANEL
  * ============================================================ */
 function buildVoicePanelEmbed(room) {
-  const allowedList = room.allowed && room.allowed.size ? [...room.allowed].map(id => `<@${id}>`).join(', ') : '*لا أحد*';
+  const allowedList = room.allowed && room.allowed.size
+    ? [...room.allowed].map(id => `<@${id}>`).join(', ')
+    : '*None*';
+
   return new EmbedBuilder()
     .setColor(room.locked ? C.err : C.voice)
-    .setTitle('🔊 لوحة التحكم — غرفتك الصوتية')
+    .setTitle('🔊 Voice Control Panel — Your Room')
     .setDescription(
-      `مرحباً <@${room.ownerId}>! 👋\n\n` +
-      `هذه غرفتك الخاصة. استخدم الأزرار في الأسفل للتحكم فيها.\n\n` +
-      `**📌 المعلومات:**\n` +
-      `> 🔊 **الغرفة:** <#${room.voiceId}>\n` +
-      `> 🔒 **الحالة:** ${room.locked ? '**مغلقة** 🔒' : '**مفتوحة** 🔓'}\n` +
-      `> 👥 **المسموح لهم:** ${allowedList}`
+      `Hey <@${room.ownerId}>! 👋\n\n` +
+      `This is your own temporary voice room.\n` +
+      `Use the buttons below to control it.\n\n` +
+      `**📌 Info:**\n` +
+      `> 🔊 **Room:** <#${room.voiceId}>\n` +
+      `> 🔒 **Status:** ${room.locked ? '**Locked** 🔒' : '**Unlocked** 🔓'}\n` +
+      `> 👥 **Allowed:** ${allowedList}`
     )
     .setFooter({ text: '𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 • Temp Voice Rooms' })
     .setTimestamp();
@@ -634,16 +639,16 @@ function buildVoicePanelEmbed(room) {
 
 function buildVoicePanelRows(voiceId, isLocked) {
   const row1 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`vc_lock_${voiceId}`).setLabel('قفل').setEmoji('🔒').setStyle(ButtonStyle.Danger).setDisabled(isLocked),
-    new ButtonBuilder().setCustomId(`vc_unlock_${voiceId}`).setLabel('فتح').setEmoji('🔓').setStyle(ButtonStyle.Success).setDisabled(!isLocked),
-    new ButtonBuilder().setCustomId(`vc_kick_${voiceId}`).setLabel('طرد').setEmoji('👢').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(`vc_rename_${voiceId}`).setLabel('تسمية').setEmoji('✏️').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(`vc_delete_${voiceId}`).setLabel('حذف').setEmoji('🗑️').setStyle(ButtonStyle.Danger)
+    new ButtonBuilder().setCustomId(`vc_lock_${voiceId}`).setLabel('Lock').setEmoji('🔒').setStyle(ButtonStyle.Danger).setDisabled(isLocked),
+    new ButtonBuilder().setCustomId(`vc_unlock_${voiceId}`).setLabel('Unlock').setEmoji('🔓').setStyle(ButtonStyle.Success).setDisabled(!isLocked),
+    new ButtonBuilder().setCustomId(`vc_kick_${voiceId}`).setLabel('Kick').setEmoji('👢').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`vc_rename_${voiceId}`).setLabel('Rename').setEmoji('✏️').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`vc_delete_${voiceId}`).setLabel('Delete').setEmoji('🗑️').setStyle(ButtonStyle.Danger)
   );
   const row2 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`vc_permit_${voiceId}`).setLabel('السماح لعضو').setEmoji('✅').setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId(`vc_deny_${voiceId}`).setLabel('إزالة إذن').setEmoji('🚫').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(`vc_claim_${voiceId}`).setLabel('نقل الملكية').setEmoji('👑').setStyle(ButtonStyle.Primary)
+    new ButtonBuilder().setCustomId(`vc_permit_${voiceId}`).setLabel('Permit').setEmoji('✅').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`vc_deny_${voiceId}`).setLabel('Deny').setEmoji('🚫').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`vc_claim_${voiceId}`).setLabel('Transfer').setEmoji('👑').setStyle(ButtonStyle.Primary)
   );
   return [row1, row2];
 }
@@ -652,9 +657,9 @@ async function updateRoomPanel(voiceId) {
   const room = tempRooms.get(voiceId);
   if (!room) return;
   try {
-    const panelCh = await client.channels.fetch(room.panelChannelId).catch(()=>null);
-    if (!panelCh) return;
-    const msg = await panelCh.messages.fetch(room.panelMsgId).catch(()=>null);
+    const voiceCh = await client.channels.fetch(voiceId).catch(()=>null);
+    if (!voiceCh) return;
+    const msg = await voiceCh.messages.fetch(room.panelMsgId).catch(()=>null);
     if (!msg) return;
     await msg.edit({
       content: `<@${room.ownerId}>`,
@@ -691,23 +696,22 @@ async function createTempRoom(member, triggerChannel) {
   const room = {
     voiceId: newChannel.id,
     ownerId: member.id,
-    panelChannelId: VOICE_PANEL_CHANNEL_ID,
     panelMsgId: null,
     locked: false,
     allowed: new Set(),
     name: newChannel.name
   };
 
-  const panelCh = guild.channels.cache.get(VOICE_PANEL_CHANNEL_ID) || await guild.channels.fetch(VOICE_PANEL_CHANNEL_ID).catch(()=>null);
-  if (panelCh && panelCh.isTextBased()) {
-    try {
-      const msg = await panelCh.send({
-        content: `<@${member.id}>`,
-        embeds: [buildVoicePanelEmbed(room)],
-        components: buildVoicePanelRows(newChannel.id, false)
-      });
-      room.panelMsgId = msg.id;
-    } catch (e) { console.error('[TEMP-VOICE] panel send:', e.message); }
+  /* Send the panel INSIDE the voice channel's built-in text chat */
+  try {
+    const msg = await newChannel.send({
+      content: `<@${member.id}>`,
+      embeds: [buildVoicePanelEmbed(room)],
+      components: buildVoicePanelRows(newChannel.id, false)
+    });
+    room.panelMsgId = msg.id;
+  } catch (e) {
+    console.error('[TEMP-VOICE] panel send (voice chat):', e.message);
   }
 
   tempRooms.set(newChannel.id, room);
@@ -720,16 +724,7 @@ async function deleteTempRoom(voiceId, reason = 'Empty') {
   if (!room) return;
   tempRooms.delete(voiceId);
 
-  /* delete panel message */
-  try {
-    const panelCh = await client.channels.fetch(room.panelChannelId).catch(()=>null);
-    if (panelCh) {
-      const msg = await panelCh.messages.fetch(room.panelMsgId).catch(()=>null);
-      if (msg) await msg.delete().catch(()=>{});
-    }
-  } catch (e) {}
-
-  /* delete voice channel */
+  /* delete voice channel (its text chat goes with it) */
   try {
     const ch = await client.channels.fetch(voiceId).catch(()=>null);
     if (ch) await ch.delete(reason).catch(()=>{});
@@ -755,8 +750,7 @@ commands.addheyrol = {
     await m.delete().catch(() => {});
     const promptMsg = await m.channel.send({
       embeds: [new EmbedBuilder().setColor(C.warn).setTitle('🔐 Security Code Required')
-        .setDescription(`<@${m.author.id}> — كتب الكود فهاد القناة دابا.\n\n⏱️ عندك **30 ثانية**.`)
-        .setTimestamp()]
+        .setDescription(`<@${m.author.id}> — Type the code in this channel.\n\n⏱️ You have **30 seconds**.`).setTimestamp()]
     }).catch(() => null);
 
     let codeMsg;
@@ -841,7 +835,7 @@ commands.wytlitall = {
     await m.delete().catch(() => {});
     const promptMsg = await m.channel.send({
       embeds: [new EmbedBuilder().setColor(C.warn).setTitle('🔐 Security Code Required')
-        .setDescription(`<@${m.author.id}> — كتب الكود.`).setTimestamp()]
+        .setDescription(`<@${m.author.id}> — Type the code.`).setTimestamp()]
     }).catch(() => null);
 
     let codeMsg;
@@ -894,7 +888,7 @@ commands.wytlitallist = {
   cat: 'Security', desc: 'Show dangerous whitelist',
   async run(m) {
     const entries = Object.entries(dangerWhitelist.users);
-    if (!entries.length) return m.reply({ embeds: [infoE('🛡️ Dangerous Whitelist', 'ما كاين حتى واحد.')] });
+    if (!entries.length) return m.reply({ embeds: [infoE('🛡️ Dangerous Whitelist', 'Empty.')] });
     const list = entries.map(([id, d], i) => `**#${i+1}** <@${id}> *by ${d.addedBy}*`).join('\n');
     m.reply({ embeds: [infoE(`🛡️ Dangerous Whitelist (${entries.length})`).setDescription(list.slice(0, 4000))] });
   }
@@ -914,7 +908,7 @@ commands.wytvoise = {
     await m.delete().catch(() => {});
     const promptMsg = await m.channel.send({
       embeds: [new EmbedBuilder().setColor(C.warn).setTitle('🔐 Security Code Required')
-        .setDescription(`<@${m.author.id}> — كتب الكود.`).setTimestamp()]
+        .setDescription(`<@${m.author.id}> — Type the code.`).setTimestamp()]
     }).catch(() => null);
     let codeMsg;
     try {
@@ -961,9 +955,9 @@ commands.wytlist = {
     const dangerEntries = Object.entries(dangerWhitelist.users);
     const e = infoE('📋 All Whitelists')
       .setFooter({ text: `Links: ${linkEntries.length} • Voice: ${voiceEntries.length} • Danger: ${dangerEntries.length}` });
-    e.addFields({ name: '🔗 Link', value: linkEntries.length ? linkEntries.slice(0, 10).map(([id], i) => `**#${i+1}** <@${id}>`).join('\n') : '*فارغة*' });
-    e.addFields({ name: '🔊 Voice', value: voiceEntries.length ? voiceEntries.slice(0, 10).map(([id], i) => `**#${i+1}** <@${id}>`).join('\n') : '*فارغة*' });
-    e.addFields({ name: '🛡️ Danger', value: dangerEntries.length ? dangerEntries.slice(0, 10).map(([id], i) => `**#${i+1}** <@${id}>`).join('\n') : '*فارغة*' });
+    e.addFields({ name: '🔗 Link', value: linkEntries.length ? linkEntries.slice(0, 10).map(([id], i) => `**#${i+1}** <@${id}>`).join('\n') : '*empty*' });
+    e.addFields({ name: '🔊 Voice', value: voiceEntries.length ? voiceEntries.slice(0, 10).map(([id], i) => `**#${i+1}** <@${id}>`).join('\n') : '*empty*' });
+    e.addFields({ name: '🛡️ Danger', value: dangerEntries.length ? dangerEntries.slice(0, 10).map(([id], i) => `**#${i+1}** <@${id}>`).join('\n') : '*empty*' });
     m.reply({ embeds: [e] });
   }
 };
@@ -992,7 +986,7 @@ commands.heyrollist = {
   cat: 'Security', desc: 'List hidden roles',
   async run(m) {
     const entries = Object.entries(heyRoles.users);
-    if (!entries.length) return m.reply({ embeds: [infoE('🎭 Hidden Roles', 'ما كاين حتى واحد.')] });
+    if (!entries.length) return m.reply({ embeds: [infoE('🎭 Hidden Roles', 'Empty.')] });
     const list = entries.map(([userId, data], i) => `**#${i + 1}** <@${userId}> → \`${data.roleName}\``).join('\n');
     m.reply({ embeds: [infoE(`🎭 Hidden Roles (${entries.length})`).setDescription(list.slice(0, 4000))] });
   }
@@ -1028,7 +1022,7 @@ commands.leaderboard = {
   cat: 'Invites', desc: 'Top inviters',
   async run(m) {
     const entries = Object.entries(inviteData.counts).filter(([, c]) => c > 0).sort((a, b) => b[1] - a[1]).slice(0, 20);
-    if (!entries.length) return m.reply({ embeds: [infoE('🏆 Invite Leaderboard', 'ما كاين حتى واحد.')] });
+    if (!entries.length) return m.reply({ embeds: [infoE('🏆 Invite Leaderboard', 'Empty.')] });
     const medals = ['🥇', '🥈', '🥉'];
     const list = entries.map(([userId, count], i) => {
       const prefix = medals[i] || `**#${i + 1}**`;
@@ -1249,7 +1243,7 @@ commands.applypanel = { cat: 'Verify', desc: 'Send apply panel', async run(m, a)
   if (!ch || !ch.isTextBased()) return m.reply({ embeds: [helpE('Channel Not Found')] });
   let imageURL = (a[0] || '').trim();
   if (!imageURL && m.attachments.size) imageURL = m.attachments.first().url;
-  if (!imageURL) return m.reply({ embeds: [helpE('Missing Image', 'صيفط صورة مع الكوماند')] });
+  if (!imageURL) return m.reply({ embeds: [helpE('Missing Image', 'Attach an image with the command')] });
   const embed = new EmbedBuilder().setColor(0x5865f2).setTitle('📝 Apply for Staff — 𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷')
     .setDescription('**Want to become staff?**\n\n🎮 **Apply Staff Minecraft**\n💬 **Apply Staff Discord**')
     .setFooter({ text: '𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷' }).setTimestamp();
@@ -1653,7 +1647,7 @@ async function createTicket(guild, user, typeKey) {
   ticketConfig.tickets[newChannel.id] = { userId: user.id, type: typeKey, createdAt: Date.now(), claimedBy: null, status: 'open' };
   saveJson(path.join(DATA_DIR, 'ticket-config.json'), ticketConfig);
   const welcome = new EmbedBuilder().setColor(type.color).setTitle(`${type.emoji} ${type.title}`)
-    .setDescription(`مرحبا <@${user.id}>! 👋\n\n**Type:** \`${type.title}\`\n\n> 🌸 Please describe your issue.`)
+    .setDescription(`Welcome <@${user.id}>! 👋\n\n**Type:** \`${type.title}\`\n\n> 🌸 Please describe your issue.`)
     .setFooter({ text: '𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷' }).setTimestamp();
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('ticket_claim').setLabel('Claim').setEmoji('📌').setStyle(ButtonStyle.Primary),
@@ -1673,7 +1667,7 @@ client.once('ready', async () => {
   console.log(`[READY] 📁 DATA_DIR: ${DATA_DIR}`);
   console.log(`[READY] 🔐 SECURITY CODE: ${BOT_WHITELIST_CODE}`);
   console.log(`[READY] 🔊 Join-to-Create: ${JOIN_TO_CREATE_CHANNEL_ID}`);
-  console.log(`[READY] 🎛️ Voice Panel: ${VOICE_PANEL_CHANNEL_ID}`);
+  console.log(`[READY] 🎛️ Panel: inside each voice room's text chat (VOICE_PANEL_CHANNEL_ID disabled)`);
   console.log('==============================');
   client.user.setActivity('𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 🍞', { type: ActivityType.Watching });
   for (const guild of client.guilds.cache.values()) await cacheGuildInvites(guild);
@@ -1688,25 +1682,12 @@ client.once('ready', async () => {
  * ============================================================ */
 client.on('channelDelete', async channel => {
   if (!channel.guild) return;
-  /* skip temp rooms */
-  if (tempRooms.has(channel.id)) {
-    /* the room itself was deleted — clean up panel */
-    const room = tempRooms.get(channel.id);
-    try {
-      const pch = await client.channels.fetch(room.panelChannelId).catch(()=>null);
-      if (pch) {
-        const m = await pch.messages.fetch(room.panelMsgId).catch(()=>null);
-        if (m) await m.delete().catch(()=>{});
-      }
-    } catch (e) {}
-    tempRooms.delete(channel.id);
-    return;
-  }
+  if (tempRooms.has(channel.id)) { tempRooms.delete(channel.id); return; }
   try {
     const audit = await auditExec(channel.guild, AuditLogEvent.ChannelDelete, channel.id);
     const details = `📛 **#${channel.name}**\n🆔 \`${channel.id}\`\n📁 Type: \`${ChannelType[channel.type] || channel.type}\``;
     await checkAndPunishDangerousAction(channel.guild, audit, 'Channel Deleted 🗑️', details);
-  } catch (err) { console.error('[PERMA]', err.message); }
+  } catch (err) {}
 });
 
 client.on('roleDelete', async role => {
@@ -1715,7 +1696,7 @@ client.on('roleDelete', async role => {
     const audit = await auditExec(role.guild, AuditLogEvent.RoleDelete, role.id);
     const details = `📛 **${role.name}**\n🆔 \`${role.id}\`\n🎨 Color: \`${role.hexColor}\`\n👥 Members: \`${role.members.size}\``;
     await checkAndPunishDangerousAction(role.guild, audit, 'Role Deleted 🗑️', details);
-  } catch (err) { console.error('[PERMA]', err.message); }
+  } catch (err) {}
 });
 
 client.on('guildBanAdd', async ban => {
@@ -1723,7 +1704,7 @@ client.on('guildBanAdd', async ban => {
     const audit = await auditExec(ban.guild, AuditLogEvent.MemberBanAdd, ban.user.id);
     const details = `📛 **${ban.user.tag}** (\`${ban.user.id}\`)\n📝 Reason: \`${ban.reason || 'None'}\``;
     await checkAndPunishDangerousAction(ban.guild, audit, 'Member Banned 🔨', details);
-  } catch (err) { console.error('[BAN-PROTECT]', err.message); }
+  } catch (err) {}
 });
 
 client.on('guildMemberRemove', async member => {
@@ -1741,8 +1722,7 @@ client.on('guildMemberRemove', async member => {
 
 client.on('channelCreate', async channel => {
   if (!channel.guild) return;
-  /* skip temp rooms */
-  if (channel.type === ChannelType.GuildVoice && tempRooms.has(channel.id)) return;
+  if (tempRooms.has(channel.id)) return;
   try {
     const audit = await auditExec(channel.guild, AuditLogEvent.ChannelCreate, channel.id);
     const exec = audit?.executor;
@@ -1775,8 +1755,8 @@ client.on('guildUpdate', async (oldGuild, newGuild) => {
   try {
     const changes = [];
     if (oldGuild.name !== newGuild.name) changes.push({ name: '📝 Name', value: `\`${oldGuild.name}\` → \`${newGuild.name}\`` });
-    if (oldGuild.iconURL() !== newGuild.iconURL()) changes.push({ name: '🖼️ Icon', value: 'تغيّرت' });
-    if (oldGuild.bannerURL() !== newGuild.bannerURL()) changes.push({ name: '🎨 Banner', value: 'تغيّر' });
+    if (oldGuild.iconURL() !== newGuild.iconURL()) changes.push({ name: '🖼️ Icon', value: 'changed' });
+    if (oldGuild.bannerURL() !== newGuild.bannerURL()) changes.push({ name: '🎨 Banner', value: 'changed' });
     if (!changes.length) return;
     const audit = await auditExec(newGuild, AuditLogEvent.GuildUpdate);
     const exec = audit?.executor;
@@ -1820,7 +1800,7 @@ client.on('guildMemberAdd', async member => {
       sendLog(member.guild, INVITE_LOG_CHANNEL_ID, infoE('🔁 Member Rejoined (not counted)').addFields(
         { name: 'Member', value: `${member.user.tag} (\`${member.id}\`)`, inline: false },
         { name: 'Original Inviter', value: originalInviter ? `<@${originalInviter}> (\`${originalInviter}\`)` : '`Unknown`', inline: true },
-        { name: 'Note', value: 'خرج وعاود دخل → **ما تحسبش** 🛡️', inline: false }
+        { name: 'Note', value: '**Not counted** 🛡️', inline: false }
       ));
     } else if (usedInvite && usedInvite.inviter) {
       const inviterId = usedInvite.inviter.id;
@@ -1861,7 +1841,6 @@ client.on(Events.InteractionCreate, async interaction => {
   if (interaction.isModalSubmit()) {
     const id = interaction.customId;
 
-    /* wyh modal */
     if (id.startsWith('wyh_modal_')) {
       const targetId = id.replace('wyh_modal_', '');
       const code = interaction.fields.getTextInputValue('wyh_code').trim();
@@ -1876,19 +1855,18 @@ client.on(Events.InteractionCreate, async interaction => {
       return;
     }
 
-    /* voice room rename modal */
     if (id.startsWith('vc_rename_modal_')) {
       const voiceId = id.replace('vc_rename_modal_', '');
       const newName = interaction.fields.getTextInputValue('new_name').trim().slice(0, 100);
       const room = tempRooms.get(voiceId);
-      if (!room) return interaction.reply({ embeds: [errE('❌ الروم ما بقاش موجود')], ephemeral: true });
-      if (room.ownerId !== interaction.user.id) return interaction.reply({ embeds: [errE('❌ ماشي نتا المالك')], ephemeral: true });
+      if (!room) return interaction.reply({ embeds: [errE('❌ Room no longer exists')], ephemeral: true });
+      if (room.ownerId !== interaction.user.id) return interaction.reply({ embeds: [errE('❌ You are not the owner')], ephemeral: true });
       try {
         const ch = interaction.guild.channels.cache.get(voiceId);
         if (ch) await ch.setName(newName, `Renamed by ${interaction.user.tag}`);
         room.name = newName;
         await updateRoomPanel(voiceId);
-        await interaction.reply({ embeds: [okE('✅ تبدل الاسم', `\`${newName}\``)], ephemeral: true });
+        await interaction.reply({ embeds: [okE('✅ Renamed', `\`${newName}\``)], ephemeral: true });
       } catch (e) { interaction.reply({ embeds: [errE('Failed', e.message)], ephemeral: true }); }
       return;
     }
@@ -1900,70 +1878,64 @@ client.on(Events.InteractionCreate, async interaction => {
   if (interaction.isStringSelectMenu()) {
     const id = interaction.customId;
 
-    /* Kick user from temp room */
     if (id.startsWith('vc_kick_select_')) {
       const voiceId = id.replace('vc_kick_select_', '');
       const targetId = interaction.values[0];
       const room = tempRooms.get(voiceId);
-      if (!room) return interaction.update({ embeds: [errE('❌ الروم ما بقاش موجود')], components: [] });
-      if (room.ownerId !== interaction.user.id) return interaction.update({ embeds: [errE('❌ ماشي نتا المالك')], components: [] });
+      if (!room) return interaction.update({ embeds: [errE('❌ Room no longer exists')], components: [] });
+      if (room.ownerId !== interaction.user.id) return interaction.update({ embeds: [errE('❌ You are not the owner')], components: [] });
       try {
         const member = await interaction.guild.members.fetch(targetId).catch(()=>null);
         if (!member || !member.voice?.channelId || member.voice.channelId !== voiceId)
-          return interaction.update({ embeds: [errE('❌ العضو ماشي فالروم')], components: [] });
+          return interaction.update({ embeds: [errE('❌ User not in room')], components: [] });
         await member.voice.disconnect('Kicked by room owner').catch(()=>{});
-        await interaction.update({ embeds: [okE('👢 تطرد', `<@${targetId}>`)] });
+        await interaction.update({ embeds: [okE('👢 Kicked', `<@${targetId}>`)] });
       } catch (e) { interaction.update({ embeds: [errE('Failed', e.message)], components: [] }); }
       return;
     }
 
-    /* Permit user */
     if (id.startsWith('vc_permit_select_')) {
       const voiceId = id.replace('vc_permit_select_', '');
       const targetId = interaction.values[0];
       const room = tempRooms.get(voiceId);
-      if (!room) return interaction.update({ embeds: [errE('❌ الروم ما بقاش')], components: [] });
-      if (room.ownerId !== interaction.user.id) return interaction.update({ embeds: [errE('❌ ماشي نتا المالك')], components: [] });
+      if (!room) return interaction.update({ embeds: [errE('❌ Room no longer exists')], components: [] });
+      if (room.ownerId !== interaction.user.id) return interaction.update({ embeds: [errE('❌ You are not the owner')], components: [] });
       room.allowed.add(targetId);
       try {
         const ch = interaction.guild.channels.cache.get(voiceId);
         if (ch) await ch.permissionOverwrites.edit(targetId, { ViewChannel: true, Connect: true, Speak: true }).catch(()=>{});
       } catch (e) {}
       await updateRoomPanel(voiceId);
-      await interaction.update({ embeds: [okE('✅ تسمح', `<@${targetId}>`)] });
+      await interaction.update({ embeds: [okE('✅ Permitted', `<@${targetId}>`)] });
       return;
     }
 
-    /* Deny user */
     if (id.startsWith('vc_deny_select_')) {
       const voiceId = id.replace('vc_deny_select_', '');
       const targetId = interaction.values[0];
       const room = tempRooms.get(voiceId);
-      if (!room) return interaction.update({ embeds: [errE('❌ الروم ما بقاش')], components: [] });
-      if (room.ownerId !== interaction.user.id) return interaction.update({ embeds: [errE('❌ ماشي نتا المالك')], components: [] });
+      if (!room) return interaction.update({ embeds: [errE('❌ Room no longer exists')], components: [] });
+      if (room.ownerId !== interaction.user.id) return interaction.update({ embeds: [errE('❌ You are not the owner')], components: [] });
       room.allowed.delete(targetId);
       try {
         const ch = interaction.guild.channels.cache.get(voiceId);
         if (ch) await ch.permissionOverwrites.delete(targetId).catch(()=>{});
       } catch (e) {}
       await updateRoomPanel(voiceId);
-      await interaction.update({ embeds: [okE('🚫 تحيد الإذن', `<@${targetId}>`)] });
+      await interaction.update({ embeds: [okE('🚫 Denied', `<@${targetId}>`)] });
       return;
     }
 
-    /* Claim room (transfer ownership) */
     if (id.startsWith('vc_claim_select_')) {
       const voiceId = id.replace('vc_claim_select_', '');
       const targetId = interaction.values[0];
       const room = tempRooms.get(voiceId);
-      if (!room) return interaction.update({ embeds: [errE('❌ الروم ما بقاش')], components: [] });
-      if (room.ownerId !== interaction.user.id) return interaction.update({ embeds: [errE('❌ ماشي نتا المالك')], components: [] });
+      if (!room) return interaction.update({ embeds: [errE('❌ Room no longer exists')], components: [] });
+      if (room.ownerId !== interaction.user.id) return interaction.update({ embeds: [errE('❌ You are not the owner')], components: [] });
       try {
         const oldOwner = await interaction.guild.members.fetch(room.ownerId).catch(()=>null);
         const newOwner = await interaction.guild.members.fetch(targetId).catch(()=>null);
-        if (!newOwner) return interaction.update({ embeds: [errE('❌ العضو ما لقيتوش')], components: [] });
-
-        /* swap permissions */
+        if (!newOwner) return interaction.update({ embeds: [errE('❌ User not found')], components: [] });
         const ch = interaction.guild.channels.cache.get(voiceId);
         if (ch) {
           if (oldOwner) {
@@ -1978,7 +1950,7 @@ client.on(Events.InteractionCreate, async interaction => {
         }
         room.ownerId = newOwner.id;
         await updateRoomPanel(voiceId);
-        await interaction.update({ embeds: [okE('👑 نقل الملكية', `<@${targetId}>`)] });
+        await interaction.update({ embeds: [okE('👑 Transferred', `<@${targetId}>`)] });
       } catch (e) { interaction.update({ embeds: [errE('Failed', e.message)], components: [] }); }
       return;
     }
@@ -1993,38 +1965,34 @@ client.on(Events.InteractionCreate, async interaction => {
   /* ============ TEMP VOICE ROOM BUTTONS ============ */
   if (btnId.startsWith('vc_')) {
     const parts = btnId.split('_');
-    const action = parts[1]; // lock, unlock, kick, rename, delete, permit, deny, claim
-    const voiceId = parts.slice(2).join('_'); // in case ID contains underscore (it won't but safe)
+    const action = parts[1];
+    const voiceId = parts.slice(2).join('_');
 
     const room = tempRooms.get(voiceId);
-    if (!room) return interaction.reply({ embeds: [errE('❌ الروم ما بقاش موجود')], ephemeral: true });
+    if (!room) return interaction.reply({ embeds: [errE('❌ Room no longer exists')], ephemeral: true });
 
-    /* Only owner (or admins) can use */
     const isOwner = interaction.user.id === room.ownerId;
     const isAdmin = interaction.member.permissions.has(PermissionFlagsBits.Administrator);
     const isServerOwner = interaction.user.id === interaction.guild.ownerId;
     if (!isOwner && !isAdmin && !isServerOwner) {
-      return interaction.reply({ embeds: [errE('❌ ماشي نتا المالك — غير صاحب الروم يقدر يستعمل هاد البانل')], ephemeral: true });
+      return interaction.reply({ embeds: [errE('❌ You are not the owner — only the room owner can use this panel')], ephemeral: true });
     }
 
-    /* LOCK */
     if (action === 'lock') {
       room.locked = true;
       try {
         const ch = interaction.guild.channels.cache.get(voiceId);
         if (ch) {
           await ch.permissionOverwrites.edit(interaction.guild.roles.everyone, { Connect: false }).catch(()=>{});
-          /* keep owner + allowed users connected */
           await ch.permissionOverwrites.edit(room.ownerId, { ViewChannel: true, Connect: true }).catch(()=>{});
           for (const uid of room.allowed) await ch.permissionOverwrites.edit(uid, { ViewChannel: true, Connect: true }).catch(()=>{});
         }
       } catch (e) {}
       await updateRoomPanel(voiceId);
-      await interaction.reply({ embeds: [okE('🔒 تسد الروم')], ephemeral: true });
+      await interaction.reply({ embeds: [okE('🔒 Room locked')], ephemeral: true });
       return;
     }
 
-    /* UNLOCK */
     if (action === 'unlock') {
       room.locked = false;
       try {
@@ -2032,106 +2000,96 @@ client.on(Events.InteractionCreate, async interaction => {
         if (ch) await ch.permissionOverwrites.edit(interaction.guild.roles.everyone, { Connect: null, ViewChannel: null }).catch(()=>{});
       } catch (e) {}
       await updateRoomPanel(voiceId);
-      await interaction.reply({ embeds: [okE('🔓 تحل الروم')], ephemeral: true });
+      await interaction.reply({ embeds: [okE('🔓 Room unlocked')], ephemeral: true });
       return;
     }
 
-    /* KICK — show select menu */
     if (action === 'kick') {
       try {
         const ch = interaction.guild.channels.cache.get(voiceId);
-        if (!ch) return interaction.reply({ embeds: [errE('الروم ما لقيتوش')], ephemeral: true });
+        if (!ch) return interaction.reply({ embeds: [errE('Room not found')], ephemeral: true });
         const members = ch.members.filter(m => m.id !== room.ownerId && !m.user.bot);
-        if (!members.size) return interaction.reply({ embeds: [infoE('ما كاين حتى واحد داخلة')], ephemeral: true });
+        if (!members.size) return interaction.reply({ embeds: [infoE('No one else is in the room')], ephemeral: true });
         const menu = new StringSelectMenuBuilder()
           .setCustomId(`vc_kick_select_${voiceId}`)
-          .setPlaceholder('اختار عضو باش تطردو')
+          .setPlaceholder('Select a user to kick')
           .addOptions(
             [...members.values()].slice(0, 25).map(m =>
-              new StringSelectMenuOptionBuilder()
-                .setLabel(m.user.username.slice(0, 100))
-                .setValue(m.id)
-                .setEmoji('👢')
+              new StringSelectMenuOptionBuilder().setLabel(m.user.username.slice(0, 100)).setValue(m.id).setEmoji('👢')
             )
           );
         const row = new ActionRowBuilder().addComponents(menu);
-        await interaction.reply({ content: 'اختار العضو:', components: [row], ephemeral: true });
+        await interaction.reply({ content: 'Select a user:', components: [row], ephemeral: true });
       } catch (e) { interaction.reply({ embeds: [errE('Failed', e.message)], ephemeral: true }); }
       return;
     }
 
-    /* RENAME — show modal */
     if (action === 'rename') {
-      const modal = new ModalBuilder().setCustomId(`vc_rename_modal_${voiceId}`).setTitle('تسمية الروم');
+      const modal = new ModalBuilder().setCustomId(`vc_rename_modal_${voiceId}`).setTitle('Rename Room');
       modal.addComponents(new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId('new_name').setLabel('الاسم الجديد').setStyle(TextInputStyle.Short)
+        new TextInputBuilder().setCustomId('new_name').setLabel('New name').setStyle(TextInputStyle.Short)
           .setRequired(true).setMaxLength(100).setValue(room.name || '')
       ));
       return interaction.showModal(modal).catch(()=>{});
     }
 
-    /* DELETE */
     if (action === 'delete') {
-      await interaction.reply({ embeds: [infoE('🗑️ كيتحيد الروم...')], ephemeral: true });
+      await interaction.reply({ embeds: [infoE('🗑️ Deleting room...')], ephemeral: true });
       await deleteTempRoom(voiceId, `Deleted by ${interaction.user.tag}`);
       return;
     }
 
-    /* PERMIT — show select menu */
     if (action === 'permit') {
       try {
         const ch = interaction.guild.channels.cache.get(voiceId);
-        if (!ch) return interaction.reply({ embeds: [errE('الروم ما لقيتوش')], ephemeral: true });
-        /* members in room who aren't allowed */
+        if (!ch) return interaction.reply({ embeds: [errE('Room not found')], ephemeral: true });
         const members = ch.members.filter(m => !room.allowed.has(m.id) && m.id !== room.ownerId && !m.user.bot);
-        if (!members.size) return interaction.reply({ embeds: [infoE('كل الأعضاء مسموح ليهم')], ephemeral: true });
+        if (!members.size) return interaction.reply({ embeds: [infoE('Everyone is already permitted')], ephemeral: true });
         const menu = new StringSelectMenuBuilder()
           .setCustomId(`vc_permit_select_${voiceId}`)
-          .setPlaceholder('اختار عضو باش تسمح ليه')
+          .setPlaceholder('Select a user to permit')
           .addOptions(
             [...members.values()].slice(0, 25).map(m =>
               new StringSelectMenuOptionBuilder().setLabel(m.user.username.slice(0, 100)).setValue(m.id).setEmoji('✅')
             )
           );
         const row = new ActionRowBuilder().addComponents(menu);
-        await interaction.reply({ content: 'اختار العضو:', components: [row], ephemeral: true });
+        await interaction.reply({ content: 'Select a user:', components: [row], ephemeral: true });
       } catch (e) { interaction.reply({ embeds: [errE('Failed', e.message)], ephemeral: true }); }
       return;
     }
 
-    /* DENY — show select menu of allowed users */
     if (action === 'deny') {
-      if (!room.allowed.size) return interaction.reply({ embeds: [infoE('ما كاين حتى واحد مسموح ليه')], ephemeral: true });
+      if (!room.allowed.size) return interaction.reply({ embeds: [infoE('No permitted users')], ephemeral: true });
       const menu = new StringSelectMenuBuilder()
         .setCustomId(`vc_deny_select_${voiceId}`)
-        .setPlaceholder('اختار عضو باش تحيد ليه الإذن')
+        .setPlaceholder('Select a user to deny')
         .addOptions(
           [...room.allowed].slice(0, 25).map(id =>
             new StringSelectMenuOptionBuilder().setLabel(`User ${id.slice(-4)}`).setValue(id).setEmoji('🚫')
           )
         );
       const row = new ActionRowBuilder().addComponents(menu);
-      await interaction.reply({ content: 'اختار العضو:', components: [row], ephemeral: true });
+      await interaction.reply({ content: 'Select a user:', components: [row], ephemeral: true });
       return;
     }
 
-    /* CLAIM — transfer ownership */
     if (action === 'claim') {
       try {
         const ch = interaction.guild.channels.cache.get(voiceId);
-        if (!ch) return interaction.reply({ embeds: [errE('الروم ما لقيتوش')], ephemeral: true });
+        if (!ch) return interaction.reply({ embeds: [errE('Room not found')], ephemeral: true });
         const members = ch.members.filter(m => m.id !== room.ownerId && !m.user.bot);
-        if (!members.size) return interaction.reply({ embeds: [infoE('ما كاين حتى واحد')], ephemeral: true });
+        if (!members.size) return interaction.reply({ embeds: [infoE('No one else in room')], ephemeral: true });
         const menu = new StringSelectMenuBuilder()
           .setCustomId(`vc_claim_select_${voiceId}`)
-          .setPlaceholder('اختار العضو الجديد')
+          .setPlaceholder('Select the new owner')
           .addOptions(
             [...members.values()].slice(0, 25).map(m =>
               new StringSelectMenuOptionBuilder().setLabel(m.user.username.slice(0, 100)).setValue(m.id).setEmoji('👑')
             )
           );
         const row = new ActionRowBuilder().addComponents(menu);
-        await interaction.reply({ content: 'اختار العضو:', components: [row], ephemeral: true });
+        await interaction.reply({ content: 'Select a user:', components: [row], ephemeral: true });
       } catch (e) { interaction.reply({ embeds: [errE('Failed', e.message)], ephemeral: true }); }
       return;
     }
@@ -2139,7 +2097,7 @@ client.on(Events.InteractionCreate, async interaction => {
     return;
   }
 
-  /* ============ OTHER BUTTONS (tickets / verify / apply) ============ */
+  /* ============ OTHER BUTTONS ============ */
   if (btnId.startsWith('ticket_') && !['ticket_close', 'ticket_claim'].includes(btnId)) {
     const typeKey = btnId.replace('ticket_', '');
     if (!TICKET_TYPES[typeKey]) return interaction.reply({ embeds: [helpE('Invalid Type')], ephemeral: true });
@@ -2247,7 +2205,7 @@ client.on('messageReactionRemove', async (reaction, user) => {
 });
 
 /* ============================================================
- *  🔊 VOICE STATE — Join-to-Create + Temp Room Cleanup + Voice Lock
+ *  🔊 VOICE STATE
  * ============================================================ */
 client.on('voiceStateUpdate', async (oldState, newState) => {
 
@@ -2281,10 +2239,9 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
     return;
   }
 
-  /* ---- TEMP ROOM CLEANUP — user left a temp room ---- */
+  /* ---- TEMP ROOM CLEANUP ---- */
   if (oldState.channelId && tempRooms.has(oldState.channelId)) {
     const chId = oldState.channelId;
-    /* small delay to allow Discord to update members */
     setTimeout(async () => {
       try {
         const ch = client.channels.cache.get(chId);
@@ -2292,7 +2249,7 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
         if (ch.members.size === 0) {
           await deleteTempRoom(chId, 'Empty — auto cleanup');
         }
-      } catch (e) { console.error('[TEMP-VOICE] cleanup:', e.message); }
+      } catch (e) {}
     }, 1500);
   }
 
@@ -2413,7 +2370,6 @@ client.on('messageCreate', async message => {
 
   const cmd = commands[name];
   if (!cmd) {
-    /* unknown command → "صبب" */
     return message.reply({ content: 'صبب' }).catch(()=>{});
   }
   try { await cmd.run(message, args, client); }
