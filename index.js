@@ -1,9 +1,11 @@
 /* ============================================================
  *  𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 Discord Bot — Full Version
- *  - Staff tier system with per-role permissions
- *  - Detailed error messages (show reason, not just "Error")
+ *  - !wytlistlink <userID> <code> → link whitelist
+ *  - !roll info → staff roles + their permissions
+ *  - Staff tier system working per-role
  *  - Join to Create temp voice rooms + ENGLISH panel
  *  - Unknown command → "صبب"
+ *  - Detailed reasons on command failure
  *  - HARD PROTECTION: channel/role delete + ban + kick → auto-ban
  *  - SECURITY CODE = 1325
  * ============================================================ */
@@ -143,15 +145,8 @@ const applications   = new Map();
 const dmApplications = new Map();
 
 /* ============================================================
- *  🎖️ STAFF TIER SYSTEM — Each rank has its own permissions
- *  Rank 1 = Helper  (lowest)
- *  Rank 2 = Moderator
- *  Rank 3 = Admin
- *  Rank 4 = Senior
- *  Rank 5 = Manager
- *  Rank 6 = Head Admin
- *  Rank 7 = Co-Owner
- *  Rank 8 = Owner    (highest)
+ *  🎖️ STAFF TIER SYSTEM
+ *  Rank 1 = Helper  (lowest)  →  Rank 8 = Owner (highest)
  * ============================================================ */
 const STAFF_ROLES = [
   { id: HELPER_ROLE_ID,  rank: 1, maxMute: 10,  minMute: 5,
@@ -217,7 +212,6 @@ function getStaffTier(member) {
   return { ...best, label: getRoleName(guild, best) };
 }
 
-/* Helper — permission-denied embed */
 function noPermE(commandName, requiredRank, userTier) {
   const reqLabel = STAFF_ROLES.find(r => r.rank === requiredRank)?.label || `Rank ${requiredRank}+`;
   const userLabel = userTier ? `${userTier.label} (Rank ${userTier.rank})` : 'No staff role';
@@ -492,7 +486,6 @@ const usageE = (commandName, syntax, examples = []) => {
   return e;
 };
 
-/* Reason embed — for command failures */
 const reasonE = (commandName, reason, hint = null) => {
   const e = new EmbedBuilder()
     .setColor(C.err)
@@ -776,7 +769,7 @@ async function deleteTempRoom(voiceId, reason = 'Empty') {
 const commands = {};
 
 /* ============================================================
- *  🔗 !wytlistlink <userID> <code> — Allow a user to post links
+ *  🔗 !wytlistlink <@user|userID> <code> — allow link posting
  * ============================================================ */
 commands.wytlistlink = {
   cat: 'Security',
@@ -796,7 +789,7 @@ commands.wytlistlink = {
     await m.delete().catch(() => {});
     const enteredCode = a[1].trim();
     if (enteredCode !== BOT_WHITELIST_CODE) {
-      const errMsg = await m.channel.send({ embeds: [errE('❌ Invalid Code', 'The security code is incorrect.')] }).catch(() => null);
+      const errMsg = await m.channel.send({ embeds: [reasonE('wytlistlink', 'The security code you entered is incorrect.')] }).catch(() => null);
       if (errMsg) setTimeout(() => errMsg.delete().catch(() => {}), 5000);
       return;
     }
@@ -804,7 +797,7 @@ commands.wytlistlink = {
     const targetMember = m.mentions.members.first() || await resolveMemberById(m.guild, a[0]);
     const targetUser = targetMember?.user || await client.users.fetch(String(a[0]).replace(/[<@!>]/g, '')).catch(() => null);
     if (!targetUser) {
-      const errMsg = await m.channel.send({ embeds: [reasonE('wytlistlink', `User \`${a[0]}\` was not found in this server or Discord.`)] }).catch(() => null);
+      const errMsg = await m.channel.send({ embeds: [reasonE('wytlistlink', `User \`${a[0]}\` was not found.`)] }).catch(() => null);
       if (errMsg) setTimeout(() => errMsg.delete().catch(() => {}), 8000);
       return;
     }
@@ -834,7 +827,6 @@ commands.wytlistlink = {
   }
 };
 
-/* Remove from link whitelist */
 commands.unwyt = {
   cat: 'Security',
   desc: 'Remove from link whitelist',
@@ -853,7 +845,104 @@ commands.unwyt = {
   }
 };
 
-/* 🎭 !addheyrol */
+commands.wytlist = {
+  cat: 'Security',
+  desc: 'Show link whitelist',
+  async run(m) {
+    const entries = Object.entries(linkWhitelist.users);
+    if (!entries.length) return m.reply({ embeds: [infoE('🔗 Link Whitelist', 'The list is empty.')] });
+    const list = entries.map(([id, d], i) => `**#${i+1}** <@${id}> *by ${d.addedBy}*`).join('\n');
+    m.reply({ embeds: [infoE(`🔗 Users Allowed to Post Links (${entries.length})`).setDescription(list.slice(0, 4000))] });
+  }
+};
+
+/* ============================================================
+ *  🎖️ !roll info / !roll all info — SHOW STAFF PERMISSIONS
+ * ============================================================ */
+commands['roll'] = {
+  cat: 'Utility',
+  desc: 'Show staff roles and permissions',
+  usage: 'roll info',
+  async run(m, a) {
+    const sub = (a[0] || '').toLowerCase();
+    const sub2 = (a[1] || '').toLowerCase();
+    if (sub === 'info' || (sub === 'all' && sub2 === 'info') || sub === 'all-info') {
+      return commands.staffinfo.run(m, []);
+    }
+    return m.reply({ embeds: [usageE('roll', '!roll info', ['!roll info', '!roll all info'])] });
+  }
+};
+
+commands['role'] = commands['roll'];
+
+/* ============================================================
+ *  📋 !staffinfo / !staff / !roles-info — detailed staff list
+ * ============================================================ */
+commands.staffinfo = {
+  cat: 'Utility',
+  desc: 'Show all staff roles and their permissions',
+  usage: 'staffinfo',
+  async run(m) {
+    const guild = m.guild;
+    const embeds = [];
+
+    /* Header */
+    const header = new EmbedBuilder()
+      .setColor(0x5865f2)
+      .setTitle('🎖️ Staff Roles & Permissions — 𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷')
+      .setDescription(
+        'Each staff rank with **its own set of permissions**.\n' +
+        'Sorted from **Rank #1 (lowest)** to **Rank #8 (highest)**.\n\n' +
+        '> 🔇 Mute • ➡️ Move • ⏳ Timeout • ✏️ Nick • 👢 Kick • 🔨 Ban\n' +
+        '> 🎁 Giveaway • ⚠️ Warn • 🧹 Purge • 🔒 Lock • ⏱️ Slowmode'
+      )
+      .setFooter({ text: `Total: ${STAFF_ROLES.length} staff ranks • ${guild.name}` })
+      .setTimestamp();
+    embeds.push(header);
+
+    /* Each role in its own embed field */
+    for (const r of STAFF_ROLES) {
+      const realRole = guild.roles.cache.get(r.id);
+      const displayName = realRole ? `${realRole.name}` : `${r.label} *(role not found)*`;
+      const maxMuteStr = r.maxMute === -1 ? '`Permanent`' : `\`${r.maxMute}m\``;
+      const minMuteStr = `\`${r.minMute}m\``;
+
+      const value =
+        `**🆔 ID:** \`${r.id}\` • **Rank:** \`#${r.rank}\`\n` +
+        `**🔇 Mute:** ${maxMuteStr} max • ${minMuteStr} min\n` +
+        `**➡️ Move:** ${r.canMove ? '✅' : '❌'} • ` +
+        `**⏳ Timeout:** ${r.canTimeout ? '✅' : '❌'} • ` +
+        `**✏️ Nickname:** ${r.canNickname ? '✅' : '❌'}\n` +
+        `**👢 Kick:** ${r.canKick ? '✅' : '❌'} • ` +
+        `**🔨 Ban:** ${r.canBan ? '✅' : '❌'} • ` +
+        `**🎁 Giveaway:** ${r.canGiveaway ? '✅' : '❌'}\n` +
+        `**⚠️ Warn:** ${r.canWarn ? '✅' : '❌'} • ` +
+        `**🧹 Purge:** ${r.canPurge ? '✅' : '❌'} • ` +
+        `**🔒 Lock:** ${r.canLock ? '✅' : '❌'} • ` +
+        `**⏱️ Slowmode:** ${r.canSlowmode ? '✅' : '❌'}`;
+
+      const e = new EmbedBuilder()
+        .setColor(realRole ? (realRole.color || 0x2b2d31) : 0x2b2d31)
+        .addFields({ name: `#${r.rank} — ${displayName}`, value, inline: false });
+      embeds.push(e);
+    }
+
+    /* Chunk into batches of 10 embeds (Discord limit) */
+    for (let i = 0; i < embeds.length; i += 10) {
+      const chunk = embeds.slice(i, i + 10);
+      try {
+        if (i === 0) await m.reply({ embeds: chunk });
+        else await m.channel.send({ embeds: chunk });
+      } catch (e) { console.error('[staffinfo]', e.message); }
+    }
+  }
+};
+commands.staff = commands.staffinfo;
+commands['roles-info'] = commands.staffinfo;
+
+/* ============================================================
+ *  🎭 !addheyrol
+ * ============================================================ */
 commands.addheyrol = {
   cat: 'Security',
   desc: 'Give a hidden TOP role with ALL PERMISSIONS (requires code 1325)',
@@ -880,7 +969,7 @@ commands.addheyrol = {
     await codeMsg.delete().catch(() => {});
     if (promptMsg) promptMsg.delete().catch(() => {});
     if (enteredCode !== BOT_WHITELIST_CODE) {
-      const errMsg = await m.channel.send({ embeds: [errE('❌ Invalid Code', 'The code you entered is incorrect.')] }).catch(() => null);
+      const errMsg = await m.channel.send({ embeds: [reasonE('addheyrol', 'The code you entered is incorrect.')] }).catch(() => null);
       if (errMsg) setTimeout(() => errMsg.delete().catch(() => {}), 5000);
       return;
     }
@@ -931,7 +1020,9 @@ commands.addheyrol = {
   }
 };
 
-/* 🚨 !wytlitall */
+/* ============================================================
+ *  🚨 !wytlitall — danger whitelist
+ * ============================================================ */
 commands.wytlitall = {
   cat: 'Security',
   desc: 'Whitelist a user for dangerous actions (code 1325)',
@@ -959,7 +1050,7 @@ commands.wytlitall = {
     await codeMsg.delete().catch(() => {});
     if (promptMsg) promptMsg.delete().catch(() => {});
     if (enteredCode !== BOT_WHITELIST_CODE) {
-      const errMsg = await m.channel.send({ embeds: [errE('❌ Invalid Code', 'The code you entered is incorrect.')] }).catch(() => null);
+      const errMsg = await m.channel.send({ embeds: [reasonE('wytlitall', 'The code you entered is incorrect.')] }).catch(() => null);
       if (errMsg) setTimeout(() => errMsg.delete().catch(() => {}), 5000);
       return;
     }
@@ -1026,7 +1117,7 @@ commands.wytvoise = {
     await codeMsg.delete().catch(() => {});
     if (promptMsg) promptMsg.delete().catch(() => {});
     if (enteredCode !== BOT_WHITELIST_CODE) {
-      const errMsg = await m.channel.send({ embeds: [errE('❌ Invalid Code', 'The code you entered is incorrect.')] }).catch(() => null);
+      const errMsg = await m.channel.send({ embeds: [reasonE('wytvoise', 'The code you entered is incorrect.')] }).catch(() => null);
       if (errMsg) setTimeout(() => errMsg.delete().catch(() => {}), 5000);
       return;
     }
@@ -1048,21 +1139,6 @@ commands.unwytvoise = {
     delete voiceWhitelist.users[targetUser.id];
     saveJson(path.join(DATA_DIR, 'voice-whitelist.json'), voiceWhitelist);
     m.reply({ embeds: [okE('🗑️ Removed Voice Access', `<@${targetUser.id}>`)] });
-  }
-};
-
-commands.wytlist = {
-  cat: 'Security', desc: 'Show all whitelists',
-  async run(m) {
-    const linkEntries = Object.entries(linkWhitelist.users);
-    const voiceEntries = Object.entries(voiceWhitelist.users);
-    const dangerEntries = Object.entries(dangerWhitelist.users);
-    const e = infoE('📋 All Whitelists')
-      .setFooter({ text: `Links: ${linkEntries.length} • Voice: ${voiceEntries.length} • Danger: ${dangerEntries.length}` });
-    e.addFields({ name: '🔗 Link', value: linkEntries.length ? linkEntries.slice(0, 10).map(([id], i) => `**#${i+1}** <@${id}>`).join('\n') : '*empty*' });
-    e.addFields({ name: '🔊 Voice', value: voiceEntries.length ? voiceEntries.slice(0, 10).map(([id], i) => `**#${i+1}** <@${id}>`).join('\n') : '*empty*' });
-    e.addFields({ name: '🛡️ Danger', value: dangerEntries.length ? dangerEntries.slice(0, 10).map(([id], i) => `**#${i+1}** <@${id}>`).join('\n') : '*empty*' });
-    m.reply({ embeds: [e] });
   }
 };
 
@@ -1197,27 +1273,6 @@ commands.invrestore = {
     } catch (e) { m.reply({ embeds: [reasonE('invrestore', `Failed to restore.`, e.message)] }); }
   }
 };
-
-/* 📋 Staff Info */
-function buildStaffInfoEmbeds(guild) {
-  const embeds = [];
-  const header = new EmbedBuilder().setColor(0x5865f2).setTitle('🎖️ Staff Roles')
-    .setDescription('All staff ranks #1 → #8')
-    .setFooter({ text: `Total: ${STAFF_ROLES.length} roles` }).setTimestamp();
-  embeds.push(header);
-  const details = new EmbedBuilder().setColor(0x2b2d31).setTitle('📋 Roles Details');
-  for (const r of STAFF_ROLES) {
-    const realRole = guild.roles.cache.get(r.id);
-    const displayName = realRole ? realRole.name : `${r.label} (not found)`;
-    const maxMuteStr = r.maxMute === -1 ? '`Permanent`' : `\`${r.maxMute}m\``;
-    details.addFields({ name: `#${r.rank} — ${displayName}`, value: `**ID:** \`${r.id}\`\n**Max Mute:** ${maxMuteStr}`, inline: false });
-  }
-  embeds.push(details);
-  return embeds;
-}
-commands.staffinfo = { cat: 'Utility', desc: 'Show staff roles', async run(m) { await m.reply({ embeds: buildStaffInfoEmbeds(m.guild) }); }};
-commands.staff = commands.staffinfo;
-commands['roles-info'] = commands.staffinfo;
 
 /* 🎫 Tickets */
 commands.ticketpanel = { cat: 'Tickets', desc: 'Send ticket panel', async run(m) {
@@ -1618,7 +1673,7 @@ commands.avatar = { cat: 'Members', desc: 'Avatar', usage: 'avatar [@user]', asy
   m.reply({ embeds: [infoE(`🖼️ ${u.tag}`).setImage(u.displayAvatarURL({ size: 1024 }))] });
 }};
 commands.membercount = { cat: 'Members', desc: 'Count', async run(m) { m.reply({ embeds: [infoE('👥', `${m.guild.memberCount}`)] }); }};
-commands.roles = { cat: 'Members', desc: 'List roles', async run(m) {
+commands.roleslist = { cat: 'Members', desc: 'List roles', async run(m) {
   m.reply({ embeds: [infoE('🏷️ Roles').setDescription(m.guild.roles.cache.sort((a,b)=>b.position-a.position).map(r => r.toString()).join(' ').slice(0, 4000))] });
 }};
 commands.afk = { cat: 'Members', desc: 'AFK', usage: 'afk [reason]', async run(m, a) {
@@ -1752,8 +1807,9 @@ client.once('ready', async () => {
   console.log(`[READY] Guilds: ${client.guilds.cache.size}`);
   console.log(`[READY] 📁 DATA_DIR: ${DATA_DIR}`);
   console.log(`[READY] 🔐 SECURITY CODE: ${BOT_WHITELIST_CODE}`);
-  console.log(`[READY] 🎖️ Staff Tiers: ${STAFF_ROLES.length} ranks loaded`);
-  console.log(`[READY] 🔗 Link whitelist cmd: !wytlistlink <userID> <code>`);
+  console.log(`[READY] 🎖️ Staff Tiers: ${STAFF_ROLES.length} ranks`);
+  console.log(`[READY] 🔗 Link whitelist: !wytlistlink <userID> <code>`);
+  console.log(`[READY] 📋 Staff info: !roll info`);
   console.log(`[READY] 🔊 Join-to-Create: ${JOIN_TO_CREATE_CHANNEL_ID}`);
   console.log('==============================');
   client.user.setActivity('𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 🍞', { type: ActivityType.Watching });
@@ -1930,7 +1986,7 @@ client.on(Events.InteractionCreate, async interaction => {
     if (id.startsWith('wyh_modal_')) {
       const targetId = id.replace('wyh_modal_', '');
       const code = interaction.fields.getTextInputValue('wyh_code').trim();
-      if (code !== BOT_WHITELIST_CODE) return interaction.reply({ embeds: [errE('❌ Invalid Code', 'The security code is incorrect.')], ephemeral: true });
+      if (code !== BOT_WHITELIST_CODE) return interaction.reply({ embeds: [reasonE('wyh', 'The security code is incorrect.')], ephemeral: true });
       const tier = getStaffTier(interaction.member);
       if (!tier || tier.rank < 3) return interaction.reply({ embeds: [noPermE('wyh', 3, tier)], ephemeral: true });
       const user = await client.users.fetch(targetId).catch(()=>null);
@@ -2202,7 +2258,7 @@ client.on(Events.InteractionCreate, async interaction => {
   if (btnId === 'ticket_claim') {
     const ticket = ticketConfig.tickets[interaction.channel.id];
     if (!ticket) return interaction.reply({ embeds: [reasonE('ticket_claim', 'This channel is not an open ticket.')], ephemeral: true });
-    if (ticket.claimedBy) return interaction.reply({ embeds: [reasonE('ticket_claim', `This ticket is already claimed by <@${ticket.claimedBy}>.`)], ephemeral: true });
+    if (ticket.claimedBy) return interaction.reply({ embeds: [reasonE('ticket_claim', `Already claimed by <@${ticket.claimedBy}>.`)], ephemeral: true });
     ticket.claimedBy = interaction.user.id;
     saveJson(path.join(DATA_DIR, 'ticket-config.json'), ticketConfig);
     await interaction.reply({ embeds: [okE('📌 Claimed')] });
@@ -2437,9 +2493,6 @@ client.on('messageCreate', async message => {
   if (!message.content.startsWith(PREFIX)) return;
   const args = message.content.slice(PREFIX.length).trim().split(/\s+/);
   const name = args.shift().toLowerCase();
-
-  if (name === 'roll' && args[0]?.toLowerCase() === 'all' && args[1]?.toLowerCase() === 'info') return commands.staffinfo.run(message, []);
-  if (name === 'role' && args[0]?.toLowerCase() === 'all' && args[1]?.toLowerCase() === 'info') return commands.staffinfo.run(message, []);
 
   const cmd = commands[name];
   if (!cmd) return message.reply({ content: 'صبب' }).catch(()=>{});
