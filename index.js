@@ -1,6 +1,8 @@
 /* ============================================================
  *  𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 Discord Bot — Full Version
- *  - 🔊 Join to Create: temp voice rooms + ENGLISH panel INSIDE the voice room's text chat
+ *  - Staff tier system with per-role permissions
+ *  - Detailed error messages (show reason, not just "Error")
+ *  - Join to Create temp voice rooms + ENGLISH panel
  *  - Unknown command → "صبب"
  *  - HARD PROTECTION: channel/role delete + ban + kick → auto-ban
  *  - SECURITY CODE = 1325
@@ -79,15 +81,10 @@ const VOICE_LOCK_CHANNELS = [
 const VOICE_ACCESS_ROLE_ID = '1559916372941607032';
 const VOICE_LOCK_MESSAGE   = 'wach nta girls aw9 تكونت كبيرة';
 
-/* ============================================================
- *  🔊 JOIN TO CREATE — Temp Voice Rooms
- *  - Panel is now sent INSIDE the voice room's built-in text chat
- *  - VOICE_PANEL_CHANNEL_ID no longer used (kept for backward compat)
- * ============================================================ */
 const JOIN_TO_CREATE_CHANNEL_ID = '1558112136159297617';
-const VOICE_PANEL_CHANNEL_ID    = null; // disabled — panel goes inside the voice room's chat
+const VOICE_PANEL_CHANNEL_ID    = null;
 
-const tempRooms = new Map(); // voiceId → { ownerId, panelMsgId, locked, allowed: Set, name }
+const tempRooms = new Map();
 
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 
@@ -145,15 +142,57 @@ const joinLog  = [];
 const applications   = new Map();
 const dmApplications = new Map();
 
+/* ============================================================
+ *  🎖️ STAFF TIER SYSTEM — Each rank has its own permissions
+ *  Rank 1 = Helper  (lowest)
+ *  Rank 2 = Moderator
+ *  Rank 3 = Admin
+ *  Rank 4 = Senior
+ *  Rank 5 = Manager
+ *  Rank 6 = Head Admin
+ *  Rank 7 = Co-Owner
+ *  Rank 8 = Owner    (highest)
+ * ============================================================ */
 const STAFF_ROLES = [
-  { id: HELPER_ROLE_ID,  rank: 1, maxMute: 10,  minMute: 5, canMove: false, canTimeout: false, canNickname: false, canBan: false, canKick: false, canGiveaway: false, label: 'Helper' },
-  { id: MOD_ROLE_ID,     rank: 2, maxMute: 10,  minMute: 5, canMove: true,  canTimeout: false, canNickname: false, canBan: false, canKick: false, canGiveaway: true,  label: 'Moderator' },
-  { id: ADMIN_ROLE_ID,   rank: 3, maxMute: 30,  minMute: 5, canMove: true,  canTimeout: false, canNickname: false, canBan: false, canKick: true,  canGiveaway: true,  label: 'Admin' },
-  { id: SENIOR_ROLE_ID,  rank: 4, maxMute: 60,  minMute: 5, canMove: true,  canTimeout: false, canNickname: false, canBan: false, canKick: true,  canGiveaway: true,  label: 'Senior' },
-  { id: MANAGER_ROLE_ID, rank: 5, maxMute: -1,  minMute: 5, canMove: true,  canTimeout: false, canNickname: false, canBan: false, canKick: true,  canGiveaway: true,  label: 'Manager' },
-  { id: HEAD_ROLE_ID,    rank: 6, maxMute: -1,  minMute: 5, canMove: true,  canTimeout: true,  canNickname: false, canBan: false, canKick: true,  canGiveaway: true,  label: 'Head Admin' },
-  { id: COOWNER_ROLE_ID, rank: 7, maxMute: -1,  minMute: 5, canMove: true,  canTimeout: true,  canNickname: true,  canBan: false, canKick: true,  canGiveaway: true,  label: 'Co-Owner' },
-  { id: OWNER_ROLE_ID,   rank: 8, maxMute: -1,  minMute: 5, canMove: true,  canTimeout: true,  canNickname: true,  canBan: true,  canKick: true,  canGiveaway: true,  label: 'Owner' }
+  { id: HELPER_ROLE_ID,  rank: 1, maxMute: 10,  minMute: 5,
+    canMove: false, canTimeout: false, canNickname: false, canBan: false, canKick: false, canGiveaway: false,
+    canWarn: true, canPurge: true, canMute: true, canLock: false, canSlowmode: true,
+    canDanger: false, canAccessPanel: true, label: 'Helper' },
+
+  { id: MOD_ROLE_ID,     rank: 2, maxMute: 10,  minMute: 5,
+    canMove: true,  canTimeout: false, canNickname: false, canBan: false, canKick: false, canGiveaway: true,
+    canWarn: true, canPurge: true, canMute: true, canLock: true, canSlowmode: true,
+    canDanger: false, canAccessPanel: true, label: 'Moderator' },
+
+  { id: ADMIN_ROLE_ID,   rank: 3, maxMute: 30,  minMute: 5,
+    canMove: true,  canTimeout: false, canNickname: false, canBan: false, canKick: true, canGiveaway: true,
+    canWarn: true, canPurge: true, canMute: true, canLock: true, canSlowmode: true,
+    canDanger: false, canAccessPanel: true, label: 'Admin' },
+
+  { id: SENIOR_ROLE_ID,  rank: 4, maxMute: 60,  minMute: 5,
+    canMove: true,  canTimeout: false, canNickname: false, canBan: false, canKick: true, canGiveaway: true,
+    canWarn: true, canPurge: true, canMute: true, canLock: true, canSlowmode: true,
+    canDanger: false, canAccessPanel: true, label: 'Senior' },
+
+  { id: MANAGER_ROLE_ID, rank: 5, maxMute: -1,  minMute: 5,
+    canMove: true,  canTimeout: false, canNickname: false, canBan: false, canKick: true, canGiveaway: true,
+    canWarn: true, canPurge: true, canMute: true, canLock: true, canSlowmode: true,
+    canDanger: false, canAccessPanel: true, label: 'Manager' },
+
+  { id: HEAD_ROLE_ID,    rank: 6, maxMute: -1,  minMute: 5,
+    canMove: true,  canTimeout: true,  canNickname: false, canBan: false, canKick: true, canGiveaway: true,
+    canWarn: true, canPurge: true, canMute: true, canLock: true, canSlowmode: true,
+    canDanger: false, canAccessPanel: true, label: 'Head Admin' },
+
+  { id: COOWNER_ROLE_ID, rank: 7, maxMute: -1,  minMute: 5,
+    canMove: true,  canTimeout: true,  canNickname: true,  canBan: false, canKick: true, canGiveaway: true,
+    canWarn: true, canPurge: true, canMute: true, canLock: true, canSlowmode: true,
+    canDanger: false, canAccessPanel: true, label: 'Co-Owner' },
+
+  { id: OWNER_ROLE_ID,   rank: 8, maxMute: -1,  minMute: 5,
+    canMove: true,  canTimeout: true,  canNickname: true,  canBan: true,  canKick: true, canGiveaway: true,
+    canWarn: true, canPurge: true, canMute: true, canLock: true, canSlowmode: true,
+    canDanger: true, canAccessPanel: true, label: 'Owner' }
 ];
 
 function getRoleName(guild, staffData) {
@@ -177,6 +216,24 @@ function getStaffTier(member) {
   if (!best) return null;
   return { ...best, label: getRoleName(guild, best) };
 }
+
+/* Helper — permission-denied embed */
+function noPermE(commandName, requiredRank, userTier) {
+  const reqLabel = STAFF_ROLES.find(r => r.rank === requiredRank)?.label || `Rank ${requiredRank}+`;
+  const userLabel = userTier ? `${userTier.label} (Rank ${userTier.rank})` : 'No staff role';
+  return new EmbedBuilder()
+    .setColor(C.err)
+    .setTitle(`❌ You can't use \`!${commandName}\``)
+    .setDescription(
+      `**Reason:** You don't have the required rank for this command.\n\n` +
+      `📊 **Your rank:** ${userLabel}\n` +
+      `🔒 **Required:** **${reqLabel}** or above\n\n` +
+      `If you believe this is a mistake, contact a **Co-Owner** or the **Server Owner**.`
+    )
+    .setFooter({ text: '𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 • Permission Denied' })
+    .setTimestamp();
+}
+
 function canModerate(executor, target) {
   if (!executor || !target) return false;
   const guild = executor.guild;
@@ -200,10 +257,7 @@ ensureDataDir();
 
 function loadJson(file, fallback) {
   try {
-    if (fs.existsSync(file)) {
-      const raw = fs.readFileSync(file, 'utf8');
-      return JSON.parse(raw);
-    }
+    if (fs.existsSync(file)) return JSON.parse(fs.readFileSync(file, 'utf8'));
   } catch (e) { console.error(`[LOAD ${path.basename(file)}]:`, e.message); }
   return fallback;
 }
@@ -261,8 +315,6 @@ function loadInviteData() {
       d.knownMembers = parsed.knownMembers || {};
       d.meta         = parsed.meta         || {};
       console.log(`[INVITE] ⚠️ Loaded from BACKUP`);
-    } else {
-      console.log(`[INVITE] 📄 Fresh start`);
     }
   } catch (e) { console.error('[INVITE] ❌', e.message); }
   return d;
@@ -288,7 +340,6 @@ async function cacheGuildInvites(guild) {
     const map = new Map();
     invites.forEach(inv => map.set(inv.code, inv.uses || 0));
     invitesCache.set(guild.id, map);
-    console.log(`[INVITE] 🔄 Cached ${invites.size} invites`);
   } catch (e) {}
 }
 async function findUsedInvite(guild) {
@@ -438,6 +489,18 @@ const usageE = (commandName, syntax, examples = []) => {
     .setDescription(`**Usage:**\n\`\`\`${syntax}\`\`\``)
     .setFooter({ text: '𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 • Help' }).setTimestamp();
   if (examples.length) e.addFields({ name: '📝 Examples', value: examples.map(x => `\`${x}\``).join('\n') });
+  return e;
+};
+
+/* Reason embed — for command failures */
+const reasonE = (commandName, reason, hint = null) => {
+  const e = new EmbedBuilder()
+    .setColor(C.err)
+    .setTitle(`⚠️ Couldn't run \`!${commandName}\``)
+    .setDescription(`**Reason:** ${reason}`)
+    .setFooter({ text: '𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 • Command Failed' })
+    .setTimestamp();
+  if (hint) e.addFields({ name: '💡 Hint', value: hint });
   return e;
 };
 
@@ -609,18 +672,16 @@ async function checkAndPunishDangerousAction(guild, auditInfo, actionType, detai
     )
     .setThumbnail(exec.displayAvatarURL({ size: 256 }))
     .setFooter({ text: '🚨 Unauthorized' }).setTimestamp();
-
   sendLog(guild, PERMA_LOG_CHANNEL_ID, e);
 }
 
 /* ============================================================
- *           🔊 TEMP VOICE ROOMS SYSTEM — ENGLISH PANEL
+ *           🔊 TEMP VOICE ROOMS SYSTEM
  * ============================================================ */
 function buildVoicePanelEmbed(room) {
   const allowedList = room.allowed && room.allowed.size
     ? [...room.allowed].map(id => `<@${id}>`).join(', ')
     : '*None*';
-
   return new EmbedBuilder()
     .setColor(room.locked ? C.err : C.voice)
     .setTitle('🔊 Voice Control Panel — Your Room')
@@ -636,7 +697,6 @@ function buildVoicePanelEmbed(room) {
     .setFooter({ text: '𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 • Temp Voice Rooms' })
     .setTimestamp();
 }
-
 function buildVoicePanelRows(voiceId, isLocked) {
   const row1 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`vc_lock_${voiceId}`).setLabel('Lock').setEmoji('🔒').setStyle(ButtonStyle.Danger).setDisabled(isLocked),
@@ -652,7 +712,6 @@ function buildVoicePanelRows(voiceId, isLocked) {
   );
   return [row1, row2];
 }
-
 async function updateRoomPanel(voiceId) {
   const room = tempRooms.get(voiceId);
   if (!room) return;
@@ -668,11 +727,9 @@ async function updateRoomPanel(voiceId) {
     });
   } catch (e) { console.error('[TEMP-VOICE] updatePanel:', e.message); }
 }
-
 async function createTempRoom(member, triggerChannel) {
   const guild = member.guild;
   const parentId = triggerChannel?.parentId || null;
-
   const newChannel = await guild.channels.create({
     name: `🔊 ${member.user.username}`.slice(0, 100),
     type: ChannelType.GuildVoice,
@@ -680,29 +737,18 @@ async function createTempRoom(member, triggerChannel) {
     permissionOverwrites: [
       { id: guild.roles.everyone.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect] },
       { id: member.id, allow: [
-        PermissionFlagsBits.ViewChannel,
-        PermissionFlagsBits.Connect,
-        PermissionFlagsBits.ManageChannels,
-        PermissionFlagsBits.MoveMembers,
-        PermissionFlagsBits.MuteMembers,
-        PermissionFlagsBits.DeafenMembers
+        PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect,
+        PermissionFlagsBits.ManageChannels, PermissionFlagsBits.MoveMembers,
+        PermissionFlagsBits.MuteMembers, PermissionFlagsBits.DeafenMembers
       ]}
     ],
     reason: `Temp voice for ${member.user.tag}`
   });
-
   await member.voice.setChannel(newChannel).catch(()=>{});
-
   const room = {
-    voiceId: newChannel.id,
-    ownerId: member.id,
-    panelMsgId: null,
-    locked: false,
-    allowed: new Set(),
-    name: newChannel.name
+    voiceId: newChannel.id, ownerId: member.id,
+    panelMsgId: null, locked: false, allowed: new Set(), name: newChannel.name
   };
-
-  /* Send the panel INSIDE the voice channel's built-in text chat */
   try {
     const msg = await newChannel.send({
       content: `<@${member.id}>`,
@@ -710,32 +756,102 @@ async function createTempRoom(member, triggerChannel) {
       components: buildVoicePanelRows(newChannel.id, false)
     });
     room.panelMsgId = msg.id;
-  } catch (e) {
-    console.error('[TEMP-VOICE] panel send (voice chat):', e.message);
-  }
-
+  } catch (e) { console.error('[TEMP-VOICE] panel send:', e.message); }
   tempRooms.set(newChannel.id, room);
-  console.log(`[TEMP-VOICE] Created room for ${member.user.tag} → ${newChannel.name}`);
   return newChannel;
 }
-
 async function deleteTempRoom(voiceId, reason = 'Empty') {
   const room = tempRooms.get(voiceId);
   if (!room) return;
   tempRooms.delete(voiceId);
-
-  /* delete voice channel (its text chat goes with it) */
   try {
     const ch = await client.channels.fetch(voiceId).catch(()=>null);
     if (ch) await ch.delete(reason).catch(()=>{});
   } catch (e) {}
-  console.log(`[TEMP-VOICE] Deleted room ${voiceId} (${reason})`);
 }
 
 /* ============================================================
  *                       COMMANDS
  * ============================================================ */
 const commands = {};
+
+/* ============================================================
+ *  🔗 !wytlistlink <userID> <code> — Allow a user to post links
+ * ============================================================ */
+commands.wytlistlink = {
+  cat: 'Security',
+  desc: 'Allow a user to post links (requires code 1325)',
+  usage: 'wytlistlink <@user|userID> <code>',
+  async run(m, a) {
+    const tier = getStaffTier(m.member);
+    if (!tier || tier.rank < 3) {
+      return m.reply({ embeds: [noPermE('wytlistlink', 3, tier)] });
+    }
+    if (!a[0]) return m.reply({ embeds: [usageE('wytlistlink', '!wytlistlink <@user|userID> <code>', [
+      '!wytlistlink @User 1325',
+      '!wytlistlink 123456789012345678 1325'
+    ])] });
+    if (!a[1]) return m.reply({ embeds: [usageE('wytlistlink', '!wytlistlink <@user|userID> <code>')] });
+
+    await m.delete().catch(() => {});
+    const enteredCode = a[1].trim();
+    if (enteredCode !== BOT_WHITELIST_CODE) {
+      const errMsg = await m.channel.send({ embeds: [errE('❌ Invalid Code', 'The security code is incorrect.')] }).catch(() => null);
+      if (errMsg) setTimeout(() => errMsg.delete().catch(() => {}), 5000);
+      return;
+    }
+
+    const targetMember = m.mentions.members.first() || await resolveMemberById(m.guild, a[0]);
+    const targetUser = targetMember?.user || await client.users.fetch(String(a[0]).replace(/[<@!>]/g, '')).catch(() => null);
+    if (!targetUser) {
+      const errMsg = await m.channel.send({ embeds: [reasonE('wytlistlink', `User \`${a[0]}\` was not found in this server or Discord.`)] }).catch(() => null);
+      if (errMsg) setTimeout(() => errMsg.delete().catch(() => {}), 8000);
+      return;
+    }
+    if (targetUser.bot) {
+      const errMsg = await m.channel.send({ embeds: [reasonE('wytlistlink', 'Bots cannot be added to the link whitelist.')] }).catch(() => null);
+      if (errMsg) setTimeout(() => errMsg.delete().catch(() => {}), 8000);
+      return;
+    }
+    if (isLinkWhitelisted(targetUser.id)) {
+      const errMsg = await m.channel.send({ embeds: [infoE('ℹ️ Already Whitelisted', `<@${targetUser.id}> already can post links.`)] }).catch(() => null);
+      if (errMsg) setTimeout(() => errMsg.delete().catch(() => {}), 5000);
+      return;
+    }
+
+    linkWhitelist.users[targetUser.id] = {
+      addedBy: m.author.tag, addedById: m.author.id, addedAt: Date.now()
+    };
+    saveJson(path.join(DATA_DIR, 'link-whitelist.json'), linkWhitelist);
+
+    const e = okE('✅ User Whitelisted for Links').addFields(
+      { name: 'User', value: `${targetUser.tag} (\`${targetUser.id}\`)`, inline: false },
+      { name: 'By', value: m.author.tag, inline: true }
+    );
+    const sent = await m.channel.send({ embeds: [e] }).catch(() => null);
+    if (sent) setTimeout(() => sent.delete().catch(() => {}), 15000);
+    sendLog(m.guild, GENERAL_LOG_CHANNEL_ID || BAN_LOG_CHANNEL_ID, e);
+  }
+};
+
+/* Remove from link whitelist */
+commands.unwyt = {
+  cat: 'Security',
+  desc: 'Remove from link whitelist',
+  usage: 'unwyt <@user|userID>',
+  async run(m, a) {
+    const tier = getStaffTier(m.member);
+    if (!tier || tier.rank < 3) return m.reply({ embeds: [noPermE('unwyt', 3, tier)] });
+    if (!a[0]) return m.reply({ embeds: [usageE('unwyt', '!unwyt <@user|userID>')] });
+    const targetMember = m.mentions.members.first() || await resolveMemberById(m.guild, a[0]);
+    const targetUser = targetMember?.user || await client.users.fetch(String(a[0]).replace(/[<@!>]/g, '')).catch(()=>null);
+    if (!targetUser) return m.reply({ embeds: [reasonE('unwyt', `User \`${a[0]}\` was not found.`)] });
+    if (!isLinkWhitelisted(targetUser.id)) return m.reply({ embeds: [reasonE('unwyt', `<@${targetUser.id}> is not in the link whitelist.`)] });
+    delete linkWhitelist.users[targetUser.id];
+    saveJson(path.join(DATA_DIR, 'link-whitelist.json'), linkWhitelist);
+    m.reply({ embeds: [okE('🗑️ Removed', `<@${targetUser.id}>`)] });
+  }
+};
 
 /* 🎭 !addheyrol */
 commands.addheyrol = {
@@ -745,14 +861,13 @@ commands.addheyrol = {
   async run(m, a) {
     if (!a[0]) return m.reply({ embeds: [usageE('addheyrol', '!addheyrol <@user|userID>')] });
     const target = m.mentions.members.first() || await resolveMemberById(m.guild, a[0]);
-    if (!target) return m.reply({ embeds: [errE('❌ Member not found.')] });
+    if (!target) return m.reply({ embeds: [reasonE('addheyrol', `Member \`${a[0]}\` was not found in this server.`)] });
 
     await m.delete().catch(() => {});
     const promptMsg = await m.channel.send({
       embeds: [new EmbedBuilder().setColor(C.warn).setTitle('🔐 Security Code Required')
         .setDescription(`<@${m.author.id}> — Type the code in this channel.\n\n⏱️ You have **30 seconds**.`).setTimestamp()]
     }).catch(() => null);
-
     let codeMsg;
     try {
       const collected = await m.channel.awaitMessages({
@@ -761,29 +876,25 @@ commands.addheyrol = {
       });
       codeMsg = collected.first();
     } catch { if (promptMsg) promptMsg.delete().catch(() => {}); return; }
-
     const enteredCode = codeMsg.content.trim();
     await codeMsg.delete().catch(() => {});
     if (promptMsg) promptMsg.delete().catch(() => {});
-
     if (enteredCode !== BOT_WHITELIST_CODE) {
-      const errMsg = await m.channel.send({ embeds: [errE('❌ Invalid Code')] }).catch(() => null);
+      const errMsg = await m.channel.send({ embeds: [errE('❌ Invalid Code', 'The code you entered is incorrect.')] }).catch(() => null);
       if (errMsg) setTimeout(() => errMsg.delete().catch(() => {}), 5000);
       return;
     }
-
     const me = m.guild.members.me;
     if (!me.permissions.has(PermissionFlagsBits.ManageRoles)) {
-      const errMsg = await m.channel.send({ embeds: [errE('❌ Missing Manage Roles')] }).catch(() => null);
-      if (errMsg) setTimeout(() => errMsg.delete().catch(() => {}), 5000);
+      const errMsg = await m.channel.send({ embeds: [reasonE('addheyrol', 'I don\'t have the **Manage Roles** permission.')] }).catch(() => null);
+      if (errMsg) setTimeout(() => errMsg.delete().catch(() => {}), 8000);
       return;
     }
     if (me.roles.highest.position <= target.roles.highest.position) {
-      const errMsg = await m.channel.send({ embeds: [errE('❌ My role not above target')] }).catch(() => null);
-      if (errMsg) setTimeout(() => errMsg.delete().catch(() => {}), 5000);
+      const errMsg = await m.channel.send({ embeds: [reasonE('addheyrol', `My highest role (${me.roles.highest.name}) is not above **${target.user.tag}**'s highest role.`, 'Ask an admin to move my role higher.')] }).catch(() => null);
+      if (errMsg) setTimeout(() => errMsg.delete().catch(() => {}), 8000);
       return;
     }
-
     try {
       let roleId = heyRoles.users[target.id]?.roleId;
       if (roleId) {
@@ -814,7 +925,7 @@ commands.addheyrol = {
       );
       m.channel.send({ embeds: [e] }).catch(() => {});
     } catch (err) {
-      const errMsg = await m.channel.send({ embeds: [errE('❌ Failed', err.message)] }).catch(() => null);
+      const errMsg = await m.channel.send({ embeds: [reasonE('addheyrol', `Failed to create the role.`, 'Details: ' + err.message)] }).catch(() => null);
       if (errMsg) setTimeout(() => errMsg.delete().catch(() => {}), 8000);
     }
   }
@@ -829,15 +940,13 @@ commands.wytlitall = {
     if (!a[0]) return m.reply({ embeds: [usageE('wytlitall', '!wytlitall <@user|userID>', ['!wytlitall @User'])] });
     const targetMember = m.mentions.members.first() || await resolveMemberById(m.guild, a[0]);
     const targetUser = targetMember?.user || await client.users.fetch(String(a[0]).replace(/[<@!>]/g, '')).catch(()=>null);
-    if (!targetUser) return m.reply({ embeds: [errE('❌ User not found.')] });
-    if (targetUser.bot) return m.reply({ embeds: [errE('❌ Can\'t whitelist bots.')] });
-
+    if (!targetUser) return m.reply({ embeds: [reasonE('wytlitall', `User \`${a[0]}\` was not found.`)] });
+    if (targetUser.bot) return m.reply({ embeds: [reasonE('wytlitall', 'Bots cannot be added to the danger whitelist.')] });
     await m.delete().catch(() => {});
     const promptMsg = await m.channel.send({
       embeds: [new EmbedBuilder().setColor(C.warn).setTitle('🔐 Security Code Required')
         .setDescription(`<@${m.author.id}> — Type the code.`).setTimestamp()]
     }).catch(() => null);
-
     let codeMsg;
     try {
       const collected = await m.channel.awaitMessages({
@@ -846,21 +955,17 @@ commands.wytlitall = {
       });
       codeMsg = collected.first();
     } catch { if (promptMsg) promptMsg.delete().catch(() => {}); return; }
-
     const enteredCode = codeMsg.content.trim();
     await codeMsg.delete().catch(() => {});
     if (promptMsg) promptMsg.delete().catch(() => {});
-
     if (enteredCode !== BOT_WHITELIST_CODE) {
-      const errMsg = await m.channel.send({ embeds: [errE('❌ Invalid Code')] }).catch(() => null);
+      const errMsg = await m.channel.send({ embeds: [errE('❌ Invalid Code', 'The code you entered is incorrect.')] }).catch(() => null);
       if (errMsg) setTimeout(() => errMsg.delete().catch(() => {}), 5000);
       return;
     }
-    if (isDangerWhitelisted(targetUser.id)) return m.reply({ embeds: [infoE('ℹ️ Already Whitelisted')] });
-
+    if (isDangerWhitelisted(targetUser.id)) return m.reply({ embeds: [infoE('ℹ️ Already Whitelisted', `<@${targetUser.id}> is already in the danger whitelist.`)] });
     dangerWhitelist.users[targetUser.id] = { addedBy: m.author.tag, addedById: m.author.id, addedAt: Date.now() };
     saveJson(path.join(DATA_DIR, 'danger-whitelist.json'), dangerWhitelist);
-
     const e = okE('🛡️ Dangerous Actions Whitelist Granted').addFields(
       { name: '👤 User', value: `${targetUser.tag}`, inline: false },
       { name: '👑 By', value: m.author.tag, inline: true }
@@ -876,8 +981,8 @@ commands.unwytlitall = {
     if (!a[0]) return m.reply({ embeds: [usageE('unwytlitall', '!unwytlitall <@user|userID>')] });
     const targetMember = m.mentions.members.first() || await resolveMemberById(m.guild, a[0]);
     const targetUser = targetMember?.user || await client.users.fetch(String(a[0]).replace(/[<@!>]/g, '')).catch(()=>null);
-    if (!targetUser) return m.reply({ embeds: [errE('❌ User not found.')] });
-    if (!isDangerWhitelisted(targetUser.id)) return m.reply({ embeds: [infoE('Not Whitelisted')] });
+    if (!targetUser) return m.reply({ embeds: [reasonE('unwytlitall', `User \`${a[0]}\` was not found.`)] });
+    if (!isDangerWhitelisted(targetUser.id)) return m.reply({ embeds: [reasonE('unwytlitall', `<@${targetUser.id}> is not in the danger whitelist.`)] });
     delete dangerWhitelist.users[targetUser.id];
     saveJson(path.join(DATA_DIR, 'danger-whitelist.json'), dangerWhitelist);
     m.reply({ embeds: [okE('🗑️ Removed', `<@${targetUser.id}>`)] });
@@ -888,7 +993,7 @@ commands.wytlitallist = {
   cat: 'Security', desc: 'Show dangerous whitelist',
   async run(m) {
     const entries = Object.entries(dangerWhitelist.users);
-    if (!entries.length) return m.reply({ embeds: [infoE('🛡️ Dangerous Whitelist', 'Empty.')] });
+    if (!entries.length) return m.reply({ embeds: [infoE('🛡️ Dangerous Whitelist', 'The list is empty.')] });
     const list = entries.map(([id, d], i) => `**#${i+1}** <@${id}> *by ${d.addedBy}*`).join('\n');
     m.reply({ embeds: [infoE(`🛡️ Dangerous Whitelist (${entries.length})`).setDescription(list.slice(0, 4000))] });
   }
@@ -902,9 +1007,8 @@ commands.wytvoise = {
     if (!a[0]) return m.reply({ embeds: [usageE('wytvoise', '!wytvoise <@user|userID>')] });
     const targetMember = m.mentions.members.first() || await resolveMemberById(m.guild, a[0]);
     const targetUser = targetMember?.user || await client.users.fetch(String(a[0]).replace(/[<@!>]/g, '')).catch(()=>null);
-    if (!targetUser) return m.reply({ embeds: [errE('❌ User not found.')] });
-    if (targetUser.bot) return m.reply({ embeds: [errE('❌ Can\'t whitelist bots.')] });
-
+    if (!targetUser) return m.reply({ embeds: [reasonE('wytvoise', `User \`${a[0]}\` was not found.`)] });
+    if (targetUser.bot) return m.reply({ embeds: [reasonE('wytvoise', 'Bots cannot be added to the voice whitelist.')] });
     await m.delete().catch(() => {});
     const promptMsg = await m.channel.send({
       embeds: [new EmbedBuilder().setColor(C.warn).setTitle('🔐 Security Code Required')
@@ -922,11 +1026,11 @@ commands.wytvoise = {
     await codeMsg.delete().catch(() => {});
     if (promptMsg) promptMsg.delete().catch(() => {});
     if (enteredCode !== BOT_WHITELIST_CODE) {
-      const errMsg = await m.channel.send({ embeds: [errE('❌ Invalid Code')] }).catch(() => null);
+      const errMsg = await m.channel.send({ embeds: [errE('❌ Invalid Code', 'The code you entered is incorrect.')] }).catch(() => null);
       if (errMsg) setTimeout(() => errMsg.delete().catch(() => {}), 5000);
       return;
     }
-    if (isVoiceWhitelisted(targetUser.id)) return m.reply({ embeds: [infoE('ℹ️ Already Whitelisted')] });
+    if (isVoiceWhitelisted(targetUser.id)) return m.reply({ embeds: [infoE('ℹ️ Already Whitelisted', `<@${targetUser.id}> already has voice access.`)] });
     voiceWhitelist.users[targetUser.id] = { addedBy: m.author.tag, addedById: m.author.id, addedAt: Date.now() };
     saveJson(path.join(DATA_DIR, 'voice-whitelist.json'), voiceWhitelist);
     m.channel.send({ embeds: [okE('🔊 Voice Access Granted', `<@${targetUser.id}>`)] }).catch(() => {});
@@ -939,8 +1043,8 @@ commands.unwytvoise = {
     if (!a[0]) return m.reply({ embeds: [usageE('unwytvoise', '!unwytvoise <@user|userID>')] });
     const targetMember = m.mentions.members.first() || await resolveMemberById(m.guild, a[0]);
     const targetUser = targetMember?.user || await client.users.fetch(String(a[0]).replace(/[<@!>]/g, '')).catch(()=>null);
-    if (!targetUser) return m.reply({ embeds: [errE('❌ User not found.')] });
-    if (!isVoiceWhitelisted(targetUser.id)) return m.reply({ embeds: [infoE('Not Whitelisted')] });
+    if (!targetUser) return m.reply({ embeds: [reasonE('unwytvoise', `User \`${a[0]}\` was not found.`)] });
+    if (!isVoiceWhitelisted(targetUser.id)) return m.reply({ embeds: [reasonE('unwytvoise', `<@${targetUser.id}> is not in the voice whitelist.`)] });
     delete voiceWhitelist.users[targetUser.id];
     saveJson(path.join(DATA_DIR, 'voice-whitelist.json'), voiceWhitelist);
     m.reply({ embeds: [okE('🗑️ Removed Voice Access', `<@${targetUser.id}>`)] });
@@ -966,19 +1070,19 @@ commands.removeheyrol = {
   cat: 'Security', desc: 'Remove hidden role', usage: 'removeheyrol <@user|userID>',
   async run(m, a) {
     if (m.guild.ownerId !== m.author.id && !has(m.member, PermissionFlagsBits.Administrator))
-      return m.reply({ embeds: [errE('❌ Owner only.')] });
+      return m.reply({ embeds: [reasonE('removeheyrol', 'Only the **Server Owner** or an **Administrator** can use this command.')] });
     if (!a[0]) return m.reply({ embeds: [usageE('removeheyrol', '!removeheyrol <@user|userID>')] });
     const target = m.mentions.members.first() || await resolveMemberById(m.guild, a[0]);
-    if (!target) return m.reply({ embeds: [errE('❌ Member not found.')] });
+    if (!target) return m.reply({ embeds: [reasonE('removeheyrol', `Member \`${a[0]}\` was not found.`)] });
     const data = heyRoles.users[target.id];
-    if (!data) return m.reply({ embeds: [infoE('No Hidden Role')] });
+    if (!data) return m.reply({ embeds: [reasonE('removeheyrol', `<@${target.id}> does not have a hidden role.`)] });
     try {
       const role = m.guild.roles.cache.get(data.roleId);
       if (role) await role.delete('Hidden role removed').catch(()=>{});
       delete heyRoles.users[target.id];
       saveJson(path.join(DATA_DIR, 'hey-roles.json'), heyRoles);
       m.reply({ embeds: [okE('🗑️ Removed', `<@${target.id}>`)] });
-    } catch (err) { m.reply({ embeds: [errE('❌ Failed', err.message)] }); }
+    } catch (err) { m.reply({ embeds: [reasonE('removeheyrol', `Failed to remove role.`, err.message)] }); }
   }
 };
 
@@ -986,7 +1090,7 @@ commands.heyrollist = {
   cat: 'Security', desc: 'List hidden roles',
   async run(m) {
     const entries = Object.entries(heyRoles.users);
-    if (!entries.length) return m.reply({ embeds: [infoE('🎭 Hidden Roles', 'Empty.')] });
+    if (!entries.length) return m.reply({ embeds: [infoE('🎭 Hidden Roles', 'The list is empty.')] });
     const list = entries.map(([userId, data], i) => `**#${i + 1}** <@${userId}> → \`${data.roleName}\``).join('\n');
     m.reply({ embeds: [infoE(`🎭 Hidden Roles (${entries.length})`).setDescription(list.slice(0, 4000))] });
   }
@@ -1022,7 +1126,7 @@ commands.leaderboard = {
   cat: 'Invites', desc: 'Top inviters',
   async run(m) {
     const entries = Object.entries(inviteData.counts).filter(([, c]) => c > 0).sort((a, b) => b[1] - a[1]).slice(0, 20);
-    if (!entries.length) return m.reply({ embeds: [infoE('🏆 Invite Leaderboard', 'Empty.')] });
+    if (!entries.length) return m.reply({ embeds: [infoE('🏆 Invite Leaderboard', 'No invites recorded yet.')] });
     const medals = ['🥇', '🥈', '🥉'];
     const list = entries.map(([userId, count], i) => {
       const prefix = medals[i] || `**#${i + 1}**`;
@@ -1039,7 +1143,7 @@ commands.invdebug = {
   cat: 'Invites', desc: 'Debug invites',
   async run(m) {
     if (m.guild.ownerId !== m.author.id && !has(m.member, PermissionFlagsBits.Administrator))
-      return m.reply({ embeds: [errE('❌ Owner only.')] });
+      return m.reply({ embeds: [reasonE('invdebug', 'Only the **Server Owner** or an **Administrator** can use this.')] });
     const fileExists = fs.existsSync(INVITE_FILE);
     const fileSize = fileExists ? fs.statSync(INVITE_FILE).size : 0;
     const backupExists = fs.existsSync(INVITE_BACKUP);
@@ -1061,13 +1165,13 @@ commands.invbackup = {
   cat: 'Invites', desc: 'Backup invites',
   async run(m) {
     if (m.guild.ownerId !== m.author.id && !has(m.member, PermissionFlagsBits.Administrator))
-      return m.reply({ embeds: [errE('❌ Owner only.')] });
+      return m.reply({ embeds: [reasonE('invbackup', 'Only the **Server Owner** or an **Administrator** can use this.')] });
     try {
       const json = JSON.stringify(inviteData, null, 2);
       const buf = Buffer.from(json, 'utf8');
       const file = new AttachmentBuilder(buf, { name: `invite-backup-${Date.now()}.json` });
       await m.reply({ content: '💾 **Backup**', files: [file] });
-    } catch (e) { m.reply({ embeds: [errE('Failed', e.message)] }); }
+    } catch (e) { m.reply({ embeds: [reasonE('invbackup', `Backup failed.`, e.message)] }); }
   }
 };
 
@@ -1075,22 +1179,22 @@ commands.invrestore = {
   cat: 'Invites', desc: 'Restore invites',
   async run(m) {
     if (m.guild.ownerId !== m.author.id && !has(m.member, PermissionFlagsBits.Administrator))
-      return m.reply({ embeds: [errE('❌ Owner only.')] });
-    if (!m.attachments.size) return m.reply({ embeds: [helpE('Missing File')] });
+      return m.reply({ embeds: [reasonE('invrestore', 'Only the **Server Owner** or an **Administrator** can use this.')] });
+    if (!m.attachments.size) return m.reply({ embeds: [reasonE('invrestore', 'Please attach a `.json` backup file with the command.')] });
     const att = m.attachments.first();
-    if (!att.name.endsWith('.json')) return m.reply({ embeds: [errE('❌ Only .json')] });
+    if (!att.name.endsWith('.json')) return m.reply({ embeds: [reasonE('invrestore', 'The file must be a `.json` file.')] });
     try {
       const res = await fetch(att.url);
       const text = await res.text();
       const parsed = JSON.parse(text);
-      if (!parsed.counts || !parsed.members) return m.reply({ embeds: [errE('❌ Invalid')] });
+      if (!parsed.counts || !parsed.members) return m.reply({ embeds: [reasonE('invrestore', 'The file format is invalid (missing `counts` or `members`).')] });
       inviteData.members = parsed.members || {};
       inviteData.counts = parsed.counts || {};
       inviteData.knownMembers = parsed.knownMembers || {};
       inviteData.meta = parsed.meta || {};
       saveInviteData();
       m.reply({ embeds: [okE('✅ Restored!')] });
-    } catch (e) { m.reply({ embeds: [errE('Failed', e.message)] }); }
+    } catch (e) { m.reply({ embeds: [reasonE('invrestore', `Failed to restore.`, e.message)] }); }
   }
 };
 
@@ -1115,36 +1219,10 @@ commands.staffinfo = { cat: 'Utility', desc: 'Show staff roles', async run(m) { 
 commands.staff = commands.staffinfo;
 commands['roles-info'] = commands.staffinfo;
 
-/* ⭐ !wyt / !unwyt */
-commands.wyt = { cat: 'Security', desc: 'Allow link posting', usage: 'wyt <@user|userID>', async run(m, a) {
-  const tier = getStaffTier(m.member);
-  if (!tier || tier.rank < 3) return m.reply({ embeds: [helpE('Permission Required')] });
-  if (!a[0]) return m.reply({ embeds: [usageE('wyt', '!wyt <@user|userID>')] });
-  const targetMember = m.mentions.members.first() || await resolveMemberById(m.guild, a[0]);
-  const targetUser = targetMember?.user || await client.users.fetch(String(a[0]).replace(/[<@!>]/g, '')).catch(()=>null);
-  if (!targetUser) return m.reply({ embeds: [helpE('User Not Found')] });
-  if (isLinkWhitelisted(targetUser.id)) return m.reply({ embeds: [infoE('Already')] });
-  linkWhitelist.users[targetUser.id] = { addedBy: m.author.tag, addedById: m.author.id, addedAt: Date.now() };
-  saveJson(path.join(DATA_DIR, 'link-whitelist.json'), linkWhitelist);
-  m.reply({ embeds: [okE('✅ User Whitelisted', `<@${targetUser.id}>`)] });
-}};
-
-commands.unwyt = { cat: 'Security', desc: 'Remove link whitelist', usage: 'unwyt <@user|userID>', async run(m, a) {
-  const tier = getStaffTier(m.member);
-  if (!tier || tier.rank < 3) return m.reply({ embeds: [helpE('Permission Required')] });
-  if (!a[0]) return m.reply({ embeds: [usageE('unwyt', '!unwyt <@user|userID>')] });
-  const targetMember = m.mentions.members.first() || await resolveMemberById(m.guild, a[0]);
-  const targetUser = targetMember?.user || await client.users.fetch(String(a[0]).replace(/[<@!>]/g, '')).catch(()=>null);
-  if (!targetUser) return m.reply({ embeds: [helpE('User Not Found')] });
-  if (!isLinkWhitelisted(targetUser.id)) return m.reply({ embeds: [infoE('Not Whitelisted')] });
-  delete linkWhitelist.users[targetUser.id];
-  saveJson(path.join(DATA_DIR, 'link-whitelist.json'), linkWhitelist);
-  m.reply({ embeds: [okE('🗑️ Removed', `<@${targetUser.id}>`)] });
-}};
-
 /* 🎫 Tickets */
 commands.ticketpanel = { cat: 'Tickets', desc: 'Send ticket panel', async run(m) {
-  if (!has(m.member, PermissionFlagsBits.Administrator)) return m.reply({ embeds: [helpE('Permission Required')] });
+  if (!has(m.member, PermissionFlagsBits.Administrator))
+    return m.reply({ embeds: [reasonE('ticketpanel', 'You need the **Administrator** permission.')] });
   const ch = m.channel;
   const embed = new EmbedBuilder().setColor(0x5865f2).setTitle('🎫 𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 • Ticket Support System')
     .setDescription('• 🔥 **Pub**\n• 🐛 **Bugs**\n• ⚔️ **Abuse**\n• 🔒 **Server**\n• 🛠️ **Staff Abuse**\n• 💰 **Donate**')
@@ -1162,12 +1240,12 @@ commands.ticketpanel = { cat: 'Tickets', desc: 'Send ticket panel', async run(m)
     new ButtonBuilder().setCustomId('ticket_donate').setLabel('Donate').setEmoji('💰').setStyle(ButtonStyle.Secondary)
   );
   try { await ch.send({ embeds: [embed], components: [row1, row2] }); m.reply({ embeds: [okE('✅ Sent')] }).catch(()=>{}); }
-  catch (e) { m.reply({ embeds: [errE('Failed', e.message)] }); }
+  catch (e) { m.reply({ embeds: [reasonE('ticketpanel', 'Failed to send the panel.', e.message)] }); }
 }};
 
 commands.ticketclose = { cat: 'Tickets', desc: 'Close ticket', async run(m) {
   const ticket = ticketConfig.tickets[m.channel.id];
-  if (!ticket) return m.reply({ embeds: [helpE('Not a Ticket')] });
+  if (!ticket) return m.reply({ embeds: [reasonE('ticketclose', 'This channel is not an open ticket.')] });
   await m.channel.send({ embeds: [new EmbedBuilder().setColor(0xed4245).setTitle('🔒 Closing...')] });
   delete ticketConfig.tickets[m.channel.id];
   saveJson(path.join(DATA_DIR, 'ticket-config.json'), ticketConfig);
@@ -1177,11 +1255,12 @@ commands.ticketclose = { cat: 'Tickets', desc: 'Close ticket', async run(m) {
 /* 🤖 !wyh */
 commands.wyh = { cat: 'Security', desc: 'Whitelist a bot (code 1325)', usage: 'wyh <botUserId>', async run(m, a) {
   const tier = getStaffTier(m.member);
-  if (!tier || tier.rank < 3) return m.reply({ embeds: [helpE('Permission Required')] });
+  if (!tier || tier.rank < 3) return m.reply({ embeds: [noPermE('wyh', 3, tier)] });
   if (!a[0]) return m.reply({ embeds: [usageE('wyh', '!wyh <botUserId>')] });
   const targetId = a[0].replace(/[<@!>]/g, '').trim();
   const user = await client.users.fetch(targetId).catch(()=>null);
-  if (!user || !user.bot) return m.reply({ embeds: [helpE('Not a Bot')] });
+  if (!user) return m.reply({ embeds: [reasonE('wyh', `No Discord user found with ID \`${targetId}\`.`)] });
+  if (!user.bot) return m.reply({ embeds: [reasonE('wyh', 'That user is not a bot. Use `!wytlistlink` for regular users.')] });
   const modal = new ModalBuilder().setCustomId(`wyh_modal_${targetId}`).setTitle('Bot Whitelist');
   modal.addComponents(new ActionRowBuilder().addComponents(
     new TextInputBuilder().setCustomId('wyh_code').setLabel('Security Code').setStyle(TextInputStyle.Short).setRequired(true)
@@ -1190,17 +1269,17 @@ commands.wyh = { cat: 'Security', desc: 'Whitelist a bot (code 1325)', usage: 'w
 }};
 commands.unwyh = { cat: 'Security', desc: 'Remove bot', async run(m, a) {
   const tier = getStaffTier(m.member);
-  if (!tier || tier.rank < 3) return m.reply({ embeds: [helpE('Permission Required')] });
+  if (!tier || tier.rank < 3) return m.reply({ embeds: [noPermE('unwyh', 3, tier)] });
   if (!a[0]) return m.reply({ embeds: [usageE('unwyh', '!unwyh <botUserId>')] });
   const targetId = a[0].replace(/[<@!>]/g, '').trim();
-  if (!isBotWhitelisted(targetId)) return m.reply({ embeds: [infoE('Not Whitelisted')] });
+  if (!isBotWhitelisted(targetId)) return m.reply({ embeds: [reasonE('unwyh', `Bot \`${targetId}\` is not in the whitelist.`)] });
   delete botWhitelist.bots[targetId];
   saveJson(path.join(DATA_DIR, 'bot-whitelist.json'), botWhitelist);
   m.reply({ embeds: [okE('🗑️ Removed')] });
 }};
 commands.wyhlist = { cat: 'Security', desc: 'List bots', async run(m) {
   const entries = Object.entries(botWhitelist.bots);
-  if (!entries.length) return m.reply({ embeds: [infoE('Empty')] });
+  if (!entries.length) return m.reply({ embeds: [infoE('Bot Whitelist', 'The list is empty.')] });
   const list = entries.map(([id], i) => `**#${i+1}** <@${id}>`).join('\n');
   m.reply({ embeds: [infoE(`🤖 Bots (${entries.length})`).setDescription(list)] });
 }};
@@ -1208,29 +1287,29 @@ commands.wyhlist = { cat: 'Security', desc: 'List bots', async run(m) {
 /* 🎲 !khtar */
 commands.khtar = { cat: 'Fun', desc: 'Pick winner', usage: 'khtar <messageID>', async run(m, a) {
   const tier = getStaffTier(m.member);
-  if (!tier || !tier.canGiveaway) return m.reply({ embeds: [helpE('Permission Required')] });
+  if (!tier || !tier.canGiveaway) return m.reply({ embeds: [noPermE('khtar', 2, tier)] });
   if (!a[0]) return m.reply({ embeds: [usageE('khtar', '!khtar <messageID>')] });
   const messageId = a[0].replace(/[<>&]/g, '').trim();
   let targetMsg;
   try { targetMsg = await m.channel.messages.fetch(messageId); }
-  catch { return m.reply({ embeds: [helpE('Message Not Found')] }); }
-  if (targetMsg.reactions.cache.size === 0) return m.reply({ embeds: [helpE('No Reactions')] });
+  catch { return m.reply({ embeds: [reasonE('khtar', `Message \`${messageId}\` was not found in this channel.`)] }); }
+  if (targetMsg.reactions.cache.size === 0) return m.reply({ embeds: [reasonE('khtar', 'That message has no reactions.')] });
   const reactors = new Set();
   for (const [, reaction] of targetMsg.reactions.cache) {
     const fetched = await reaction.users.fetch({ limit: 100 }).catch(()=>null);
     if (fetched) fetched.forEach(u => { if (!u.bot) reactors.add(u.id); });
   }
   const participants = [...reactors];
-  if (!participants.length) return m.reply({ embeds: [helpE('No Participants')] });
+  if (!participants.length) return m.reply({ embeds: [reasonE('khtar', 'No valid participants (only bots reacted).')] });
   const winnerId = participants[Math.floor(Math.random() * participants.length)];
   await m.channel.send({ content: `🎉 <@${winnerId}>`, embeds: [okE('🎉 Winner!', `## 🏆 <@${winnerId}>\n**Participants:** ${participants.length}`)] });
 }};
 commands.pick = commands.khtar;
 
 commands.verifypanel = { cat: 'Verify', desc: 'Send verify panel', async run(m) {
-  if (!has(m.member, PermissionFlagsBits.Administrator)) return m.reply({ embeds: [helpE('Permission Required')] });
+  if (!has(m.member, PermissionFlagsBits.Administrator)) return m.reply({ embeds: [reasonE('verifypanel', 'You need the **Administrator** permission.')] });
   let ch = m.guild.channels.cache.get(VERIFY_CHANNEL_ID) || await m.guild.channels.fetch(VERIFY_CHANNEL_ID).catch(()=>null);
-  if (!ch || !ch.isTextBased()) return m.reply({ embeds: [helpE('Channel Not Found')] });
+  if (!ch || !ch.isTextBased()) return m.reply({ embeds: [reasonE('verifypanel', 'Verify channel was not found or is not a text channel.')] });
   const embed = new EmbedBuilder().setColor(0x2b2d31).setTitle('✅ Verification').setDescription('Click to verify').setTimestamp();
   const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('verify_button').setLabel('Verify').setEmoji('✅').setStyle(ButtonStyle.Success));
   await ch.send({ embeds: [embed], components: [row] });
@@ -1238,12 +1317,12 @@ commands.verifypanel = { cat: 'Verify', desc: 'Send verify panel', async run(m) 
 }};
 
 commands.applypanel = { cat: 'Verify', desc: 'Send apply panel', async run(m, a) {
-  if (!has(m.member, PermissionFlagsBits.Administrator)) return m.reply({ embeds: [helpE('Permission Required')] });
+  if (!has(m.member, PermissionFlagsBits.Administrator)) return m.reply({ embeds: [reasonE('applypanel', 'You need the **Administrator** permission.')] });
   const ch = m.guild.channels.cache.get(APPLY_STAFF_CHANNEL_ID) || await m.guild.channels.fetch(APPLY_STAFF_CHANNEL_ID).catch(()=>null);
-  if (!ch || !ch.isTextBased()) return m.reply({ embeds: [helpE('Channel Not Found')] });
+  if (!ch || !ch.isTextBased()) return m.reply({ embeds: [reasonE('applypanel', 'Apply staff channel was not found or is not a text channel.')] });
   let imageURL = (a[0] || '').trim();
   if (!imageURL && m.attachments.size) imageURL = m.attachments.first().url;
-  if (!imageURL) return m.reply({ embeds: [helpE('Missing Image', 'Attach an image with the command')] });
+  if (!imageURL) return m.reply({ embeds: [reasonE('applypanel', 'Please attach an image with the command (used in the panel).', 'Example: `!applypanel` + attach image')] });
   const embed = new EmbedBuilder().setColor(0x5865f2).setTitle('📝 Apply for Staff — 𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷')
     .setDescription('**Want to become staff?**\n\n🎮 **Apply Staff Minecraft**\n💬 **Apply Staff Discord**')
     .setFooter({ text: '𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷' }).setTimestamp();
@@ -1252,74 +1331,80 @@ commands.applypanel = { cat: 'Verify', desc: 'Send apply panel', async run(m, a)
     new ButtonBuilder().setCustomId('apply_minecraft').setLabel('Apply Staff Minecraft').setEmoji('🎮').setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId('apply_discord').setLabel('Apply Staff Discord').setEmoji('💬').setStyle(ButtonStyle.Primary));
   try { await ch.send({ embeds: [embed], components: [row] }); m.reply({ embeds: [okE('✅ Sent')] }).catch(()=>{}); }
-  catch (e) { m.reply({ embeds: [errE('Failed', e.message)] }); }
+  catch (e) { m.reply({ embeds: [reasonE('applypanel', 'Failed to send the panel.', e.message)] }); }
 }};
 
 /* Moderation */
-commands.ban = { cat: 'Moderation', desc: 'Ban', usage: 'ban <@user> [reason]', async run(m, a) {
+commands.ban = { cat: 'Moderation', desc: 'Ban a member', usage: 'ban <@user> [reason]', async run(m, a) {
   const tier = getStaffTier(m.member);
-  if (!tier || !tier.canBan) return m.reply({ embeds: [helpE('Permission Required')] });
+  if (!tier || !tier.canBan) return m.reply({ embeds: [noPermE('ban', 8, tier)] });
   if (!a[0]) return m.reply({ embeds: [usageE('ban', '!ban <@user> [reason]')] });
   const t = (await resolveMember(m, a[0])) || (await resolveMemberById(m.guild, a[0]));
-  if (!t) return m.reply({ embeds: [helpE('Member Not Found')] });
-  if (!canModerate(m.member, t)) return m.reply({ embeds: [errE('❌ Hierarchy Error')] });
-  if (!t.bannable) return m.reply({ embeds: [errE('❌ Can\'t ban.')] });
+  if (!t) return m.reply({ embeds: [reasonE('ban', `Member \`${a[0]}\` was not found.`)] });
+  if (!canModerate(m.member, t)) return m.reply({ embeds: [reasonE('ban', `You can't ban **${t.user.tag}** — their highest role is at or above yours.`)] });
+  if (!t.bannable) return m.reply({ embeds: [reasonE('ban', `I can't ban **${t.user.tag}** — their role is higher than mine, or they're an admin.`)] });
   const r = a.slice(1).join(' ') || 'No reason';
-  await t.ban({ reason: `${m.author.tag} [${tier.label}]: ${r}` }).catch(e => m.reply({ embeds: [errE('Failed', e.message)] }));
-  const e = okE('🔨 Banned').addFields(
-    { name: 'User', value: t.user.tag, inline: true },
-    { name: 'By', value: `${m.author.tag} (${tier.label})`, inline: true },
-    { name: 'Reason', value: r });
-  m.reply({ embeds: [e] }); sendLog(m.guild, BAN_LOG_CHANNEL_ID, e);
+  try {
+    await t.ban({ reason: `${m.author.tag} [${tier.label}]: ${r}` });
+    const e = okE('🔨 Banned').addFields(
+      { name: 'User', value: t.user.tag, inline: true },
+      { name: 'By', value: `${m.author.tag} (${tier.label})`, inline: true },
+      { name: 'Reason', value: r });
+    m.reply({ embeds: [e] }); sendLog(m.guild, BAN_LOG_CHANNEL_ID, e);
+  } catch (err) { m.reply({ embeds: [reasonE('ban', `Discord refused the ban.`, err.message)] }); }
 }};
 
-commands.unban = { cat: 'Moderation', desc: 'Unban', usage: 'unban <userID>', async run(m, a) {
+commands.unban = { cat: 'Moderation', desc: 'Unban a user', usage: 'unban <userID>', async run(m, a) {
   const tier = getStaffTier(m.member);
-  if (!tier || !tier.canBan) return m.reply({ embeds: [helpE('Permission Required')] });
+  if (!tier || !tier.canBan) return m.reply({ embeds: [noPermE('unban', 8, tier)] });
   if (!a[0]) return m.reply({ embeds: [usageE('unban', '!unban <userID>')] });
-  try { await m.guild.bans.remove(a[0], a.slice(1).join(' ') || undefined); m.reply({ embeds: [okE('🔓 Unbanned')] }); }
-  catch (e) { m.reply({ embeds: [helpE('Failed', e.message)] }); }
+  try {
+    await m.guild.bans.remove(a[0], a.slice(1).join(' ') || undefined);
+    m.reply({ embeds: [okE('🔓 Unbanned')] });
+  } catch (err) { m.reply({ embeds: [reasonE('unban', `Could not unban \`${a[0]}\`.`, err.message)] }); }
 }};
 
-commands.kick = { cat: 'Moderation', desc: 'Kick', usage: 'kick <@user> [reason]', async run(m, a) {
+commands.kick = { cat: 'Moderation', desc: 'Kick a member', usage: 'kick <@user> [reason]', async run(m, a) {
   const tier = getStaffTier(m.member);
-  if (!tier || !tier.canKick) return m.reply({ embeds: [helpE('Permission Required')] });
+  if (!tier || !tier.canKick) return m.reply({ embeds: [noPermE('kick', 3, tier)] });
   if (!a[0]) return m.reply({ embeds: [usageE('kick', '!kick <@user> [reason]')] });
   const t = (await resolveMember(m, a[0])) || (await resolveMemberById(m.guild, a[0]));
-  if (!t) return m.reply({ embeds: [helpE('Member Not Found')] });
-  if (!canModerate(m.member, t)) return m.reply({ embeds: [errE('❌ Hierarchy Error')] });
-  if (!t.kickable) return m.reply({ embeds: [errE('❌ Can\'t kick.')] });
+  if (!t) return m.reply({ embeds: [reasonE('kick', `Member \`${a[0]}\` was not found.`)] });
+  if (!canModerate(m.member, t)) return m.reply({ embeds: [reasonE('kick', `You can't kick **${t.user.tag}** — their highest role is at or above yours.`)] });
+  if (!t.kickable) return m.reply({ embeds: [reasonE('kick', `I can't kick **${t.user.tag}** — their role is higher than mine.`)] });
   const r = a.slice(1).join(' ') || 'No reason';
-  await t.kick(`${m.author.tag} [${tier.label}]: ${r}`).catch(e => m.reply({ embeds: [errE('Failed', e.message)] }));
-  const e = okE('👢 Kicked').addFields(
-    { name: 'User', value: t.user.tag, inline: true },
-    { name: 'By', value: `${m.author.tag} (${tier.label})`, inline: true },
-    { name: 'Reason', value: r });
-  m.reply({ embeds: [e] }); sendLog(m.guild, KICK_LOG_CHANNEL_ID || GENERAL_LOG_CHANNEL_ID, e);
+  try {
+    await t.kick(`${m.author.tag} [${tier.label}]: ${r}`);
+    const e = okE('👢 Kicked').addFields(
+      { name: 'User', value: t.user.tag, inline: true },
+      { name: 'By', value: `${m.author.tag} (${tier.label})`, inline: true },
+      { name: 'Reason', value: r });
+    m.reply({ embeds: [e] }); sendLog(m.guild, KICK_LOG_CHANNEL_ID || GENERAL_LOG_CHANNEL_ID, e);
+  } catch (err) { m.reply({ embeds: [reasonE('kick', `Discord refused the kick.`, err.message)] }); }
 }};
 
 commands.mute = { cat: 'Moderation', desc: 'Voice-mute', usage: 'mute <@user> <minutes|perm> <reason>', async run(m, a) {
   const tier = getStaffTier(m.member);
-  if (!tier) return m.reply({ embeds: [helpE('Permission Required')] });
-  if (!a[0]) return m.reply({ embeds: [usageE('mute', '!mute <@user> <minutes|perm> <reason>')] });
+  if (!tier || !tier.canMute) return m.reply({ embeds: [noPermE('mute', 1, tier)] });
+  if (!a[0]) return m.reply({ embeds: [usageE('mute', '!mute <@user> <minutes|perm> <reason>', ['!mute @User 10 spam'])] });
   const target = m.mentions.members.first() || await resolveMemberById(m.guild, a[0]);
-  if (!target) return m.reply({ embeds: [helpE('Member Not Found')] });
-  if (!canModerate(m.member, target)) return m.reply({ embeds: [errE('❌ Hierarchy Error')] });
-  if (!a[1]) return m.reply({ embeds: [helpE('Missing Duration')] });
+  if (!target) return m.reply({ embeds: [reasonE('mute', `Member \`${a[0]}\` was not found.`)] });
+  if (!canModerate(m.member, target)) return m.reply({ embeds: [reasonE('mute', `You can't mute **${target.user.tag}** — their role is at or above yours.`)] });
+  if (!a[1]) return m.reply({ embeds: [reasonE('mute', 'Please specify a duration.', 'Format: `10` = 10 minutes, `perm` = permanent')] });
   const durArg = a[1].trim().toLowerCase();
   const reason = a.slice(2).join(' ').trim();
-  if (!reason) return m.reply({ embeds: [helpE('Missing Reason')] });
+  if (!reason) return m.reply({ embeds: [reasonE('mute', 'Please provide a reason for the mute.')] });
   let minutes = 0, permanent = false;
   if (durArg === 'perm' || durArg === 'permanent') {
-    if (tier.maxMute !== -1) return m.reply({ embeds: [helpE('❌ Max Reached')] });
+    if (tier.maxMute !== -1) return m.reply({ embeds: [reasonE('mute', `Your rank (**${tier.label}**) can only mute for up to **${fmtMinutes(tier.maxMute)}**.`)] });
     permanent = true;
   } else {
     minutes = parseInt(durArg, 10);
-    if (isNaN(minutes)) return m.reply({ embeds: [helpE('❌ Invalid')] });
-    if (minutes < tier.minMute) return m.reply({ embeds: [helpE('❌ Too Short')] });
-    if (tier.maxMute !== -1 && minutes > tier.maxMute) return m.reply({ embeds: [helpE('❌ Max Reached')] });
+    if (isNaN(minutes)) return m.reply({ embeds: [reasonE('mute', `\`${durArg}\` is not a valid duration.`, 'Use a number (minutes) or `perm`.')] });
+    if (minutes < tier.minMute) return m.reply({ embeds: [reasonE('mute', `Minimum mute time is **${tier.minMute}m**.`)] });
+    if (tier.maxMute !== -1 && minutes > tier.maxMute) return m.reply({ embeds: [reasonE('mute', `Your rank (**${tier.label}**) can only mute for up to **${fmtMinutes(tier.maxMute)}**.`)] });
   }
-  if (!target.voice?.channel) return m.reply({ embeds: [helpE('❌ Not in Voice')] });
+  if (!target.voice?.channel) return m.reply({ embeds: [reasonE('mute', `**${target.user.tag}** is not in a voice channel.`)] });
   try {
     await target.voice.setMute(true, `${m.author.tag}: ${reason}`);
     const key = `${m.guild.id}:${target.id}`;
@@ -1327,90 +1412,91 @@ commands.mute = { cat: 'Moderation', desc: 'Voice-mute', usage: 'mute <@user> <m
     saveJson(path.join(DATA_DIR, 'mute-config.json'), activeMutes);
     scheduleUnmute(key);
     m.reply({ embeds: [okE('🔇 Muted').addFields({ name: 'User', value: target.user.tag }, { name: 'Duration', value: permanent ? 'Permanent' : `${minutes}m` })] });
-  } catch (err) { m.reply({ embeds: [errE('Failed', err.message)] }); }
+  } catch (err) { m.reply({ embeds: [reasonE('mute', `Discord refused the mute.`, err.message)] }); }
 }};
 
 commands.unmute = { cat: 'Moderation', desc: 'Unmute', usage: 'unmute <@user>', async run(m, a) {
   const tier = getStaffTier(m.member);
-  if (!tier) return m.reply({ embeds: [helpE('Permission Required')] });
+  if (!tier || !tier.canMute) return m.reply({ embeds: [noPermE('unmute', 1, tier)] });
   if (!a[0]) return m.reply({ embeds: [usageE('unmute', '!unmute <@user>')] });
   const t = m.mentions.members.first() || await resolveMemberById(m.guild, a[0]);
-  if (!t) return m.reply({ embeds: [helpE('Member Not Found')] });
-  if (!t.voice?.channel || !t.voice.serverMute) return m.reply({ embeds: [helpE('Not Muted')] });
+  if (!t) return m.reply({ embeds: [reasonE('unmute', `Member \`${a[0]}\` was not found.`)] });
+  if (!t.voice?.channel || !t.voice.serverMute) return m.reply({ embeds: [reasonE('unmute', `**${t.user.tag}** is not voice-muted.`)] });
   try {
     await t.voice.setMute(false, `Unmuted by ${m.author.tag}`);
     const key = `${m.guild.id}:${t.id}`;
     if (activeMutes[key]) { delete activeMutes[key]; saveJson(path.join(DATA_DIR, 'mute-config.json'), activeMutes); if (muteTimers.has(key)) { clearTimeout(muteTimers.get(key)); muteTimers.delete(key); } }
     m.reply({ embeds: [okE('🔊 Unmuted', t.user.tag)] });
-  } catch (err) { m.reply({ embeds: [errE('Failed', err.message)] }); }
+  } catch (err) { m.reply({ embeds: [reasonE('unmute', `Discord refused the unmute.`, err.message)] }); }
 }};
 
 commands.timeout = { cat: 'Moderation', desc: 'Timeout', usage: 'timeout <@user> <min> <reason>', async run(m, a) {
   const tier = getStaffTier(m.member);
-  if (!tier || !tier.canTimeout) return m.reply({ embeds: [helpE('Permission Required')] });
+  if (!tier || !tier.canTimeout) return m.reply({ embeds: [noPermE('timeout', 6, tier)] });
   if (!a[0]) return m.reply({ embeds: [usageE('timeout', '!timeout <@user> <min> <reason>')] });
   const target = m.mentions.members.first() || await resolveMemberById(m.guild, a[0]);
-  if (!target) return m.reply({ embeds: [helpE('Member Not Found')] });
-  if (!canModerate(m.member, target)) return m.reply({ embeds: [errE('❌ Hierarchy Error')] });
+  if (!target) return m.reply({ embeds: [reasonE('timeout', `Member \`${a[0]}\` was not found.`)] });
+  if (!canModerate(m.member, target)) return m.reply({ embeds: [reasonE('timeout', `You can't timeout **${target.user.tag}** — their role is at or above yours.`)] });
   const minutes = parseInt(a[1], 10);
   const reason = a.slice(2).join(' ').trim();
-  if (isNaN(minutes) || minutes < 1) return m.reply({ embeds: [helpE('Invalid Duration')] });
-  if (!reason) return m.reply({ embeds: [helpE('Missing Reason')] });
-  if (!target.moderatable) return m.reply({ embeds: [errE('Cannot Timeout')] });
+  if (isNaN(minutes) || minutes < 1) return m.reply({ embeds: [reasonE('timeout', 'Please provide a valid duration in minutes.')] });
+  if (!reason) return m.reply({ embeds: [reasonE('timeout', 'Please provide a reason for the timeout.')] });
+  if (!target.moderatable) return m.reply({ embeds: [reasonE('timeout', `I can't timeout **${target.user.tag}** — their role is higher than mine.`)] });
   try {
     await target.timeout(minutes * 60 * 1000, `${m.author.tag}: ${reason}`);
     m.reply({ embeds: [okE('⏳ Timed Out', `${target.user.tag} — ${minutes}m`)] });
-  } catch (err) { m.reply({ embeds: [errE('Failed', err.message)] }); }
+  } catch (err) { m.reply({ embeds: [reasonE('timeout', `Discord refused the timeout.`, err.message)] }); }
 }};
 commands.untimeout = { cat: 'Moderation', desc: 'Untimeout', usage: 'untimeout <@user>', async run(m, a) {
   const tier = getStaffTier(m.member);
-  if (!tier || !tier.canTimeout) return m.reply({ embeds: [helpE('Permission Required')] });
+  if (!tier || !tier.canTimeout) return m.reply({ embeds: [noPermE('untimeout', 6, tier)] });
   if (!a[0]) return m.reply({ embeds: [usageE('untimeout', '!untimeout <@user>')] });
   const target = m.mentions.members.first() || await resolveMemberById(m.guild, a[0]);
-  if (!target) return m.reply({ embeds: [helpE('Member Not Found')] });
-  if (!target.isCommunicationDisabled()) return m.reply({ embeds: [helpE('Not Timed Out')] });
+  if (!target) return m.reply({ embeds: [reasonE('untimeout', `Member \`${a[0]}\` was not found.`)] });
+  if (!target.isCommunicationDisabled()) return m.reply({ embeds: [reasonE('untimeout', `**${target.user.tag}** is not timed out.`)] });
   try { await target.timeout(null, `Untimeout by ${m.author.tag}`); m.reply({ embeds: [okE('✅ Removed', target.user.tag)] }); }
-  catch (err) { m.reply({ embeds: [errE('Failed', err.message)] }); }
+  catch (err) { m.reply({ embeds: [reasonE('untimeout', `Discord refused.`, err.message)] }); }
 }};
 
 commands.warn = { cat: 'Moderation', desc: 'Warn', usage: 'warn <@user> [reason]', async run(m, a) {
   const tier = getStaffTier(m.member);
-  if (!tier) return m.reply({ embeds: [helpE('Permission Required')] });
+  if (!tier || !tier.canWarn) return m.reply({ embeds: [noPermE('warn', 1, tier)] });
   if (!a[0]) return m.reply({ embeds: [usageE('warn', '!warn <@user> [reason]')] });
   const t = m.mentions.members.first() || await resolveMemberById(m.guild, a[0]);
-  if (!t) return m.reply({ embeds: [helpE('Member Not Found')] });
-  if (!canModerate(m.member, t)) return m.reply({ embeds: [errE('❌ Hierarchy Error')] });
+  if (!t) return m.reply({ embeds: [reasonE('warn', `Member \`${a[0]}\` was not found.`)] });
+  if (!canModerate(m.member, t)) return m.reply({ embeds: [reasonE('warn', `You can't warn **${t.user.tag}** — their role is at or above yours.`)] });
   const r = a.slice(1).join(' ') || 'No reason';
   const list = warnings.get(t.id) || []; list.push({ mod: m.author.tag, reason: r, ts: Date.now() }); warnings.set(t.id, list);
   m.reply({ embeds: [okE('⚠️ Warned', `${t.user.tag} — Total: ${list.length}\nReason: ${r}`)] });
 }};
 commands.warnings = { cat: 'Moderation', desc: 'List warnings', usage: 'warnings <@user>', async run(m, a) {
   if (!a[0]) return m.reply({ embeds: [usageE('warnings', '!warnings <@user>')] });
-  const u = await resolveUser(m, a[0]); if (!u) return m.reply({ embeds: [helpE('User Not Found')] });
+  const u = await resolveUser(m, a[0]); if (!u) return m.reply({ embeds: [reasonE('warnings', `User \`${a[0]}\` was not found.`)] });
   const list = warnings.get(u.id) || [];
-  if (!list.length) return m.reply({ embeds: [infoE('No Warnings')] });
+  if (!list.length) return m.reply({ embeds: [infoE('No Warnings', `**${u.tag}** has no warnings.`)] });
   m.reply({ embeds: [infoE(`Warnings for ${u.tag}`).setDescription(list.map((w, i) => `**#${i+1}** — ${w.reason} *by ${w.mod}*`).join('\n'))] });
 }};
 commands.clearwarns = { cat: 'Moderation', desc: 'Clear warnings', usage: 'clearwarns <@user>', async run(m, a) {
   const tier = getStaffTier(m.member);
-  if (!tier || tier.rank < 3) return m.reply({ embeds: [helpE('Permission Required')] });
+  if (!tier || tier.rank < 3) return m.reply({ embeds: [noPermE('clearwarns', 3, tier)] });
   if (!a[0]) return m.reply({ embeds: [usageE('clearwarns', '!clearwarns <@user>')] });
-  const u = await resolveUser(m, a[0]); if (!u) return m.reply({ embeds: [helpE('User Not Found')] });
+  const u = await resolveUser(m, a[0]); if (!u) return m.reply({ embeds: [reasonE('clearwarns', `User \`${a[0]}\` was not found.`)] });
   warnings.delete(u.id);
   m.reply({ embeds: [okE('✅ Cleared', u.tag)] });
 }};
 commands.purge = { cat: 'Moderation', desc: 'Delete messages', usage: 'purge <1-100>', async run(m, a) {
   const tier = getStaffTier(m.member);
-  if (!tier) return m.reply({ embeds: [helpE('Permission Required')] });
+  if (!tier || !tier.canPurge) return m.reply({ embeds: [noPermE('purge', 1, tier)] });
   if (!a[0]) return m.reply({ embeds: [usageE('purge', '!purge <1-100>')] });
   const n = Math.min(Math.max(parseInt(a[0]) || 0, 1), 100);
   const del = await m.channel.bulkDelete(n, true).catch(()=>null);
   if (del) m.channel.send({ embeds: [okE('🧹 Purged', `${del.size}`)] }).then(msg => setTimeout(() => msg.delete().catch(()=>{}), 4000));
+  else m.reply({ embeds: [reasonE('purge', 'Could not delete messages. They may be older than 14 days.')] });
 }};
 commands.clear = commands.purge;
 commands.slowmode = { cat: 'Moderation', desc: 'Slowmode', usage: 'slowmode <sec>', async run(m, a) {
   const tier = getStaffTier(m.member);
-  if (!tier) return m.reply({ embeds: [helpE('Permission Required')] });
+  if (!tier || !tier.canSlowmode) return m.reply({ embeds: [noPermE('slowmode', 1, tier)] });
   if (!a[0]) return m.reply({ embeds: [usageE('slowmode', '!slowmode <sec>')] });
   const s = Math.min(Math.max(parseInt(a[0]) || 0, 0), 21600);
   await m.channel.setRateLimitPerUser(s).catch(()=>{});
@@ -1418,84 +1504,83 @@ commands.slowmode = { cat: 'Moderation', desc: 'Slowmode', usage: 'slowmode <sec
 }};
 commands.lock = { cat: 'Moderation', desc: 'Lock', async run(m) {
   const tier = getStaffTier(m.member);
-  if (!tier || tier.rank < 2) return m.reply({ embeds: [helpE('Permission Required')] });
+  if (!tier || !tier.canLock) return m.reply({ embeds: [noPermE('lock', 2, tier)] });
   await m.channel.permissionOverwrites.edit(m.guild.roles.everyone, { SendMessages: false }).catch(()=>{});
   m.reply({ embeds: [okE('🔒 Locked')] });
 }};
 commands.unlock = { cat: 'Moderation', desc: 'Unlock', async run(m) {
   const tier = getStaffTier(m.member);
-  if (!tier || tier.rank < 2) return m.reply({ embeds: [helpE('Permission Required')] });
+  if (!tier || !tier.canLock) return m.reply({ embeds: [noPermE('unlock', 2, tier)] });
   await m.channel.permissionOverwrites.edit(m.guild.roles.everyone, { SendMessages: null }).catch(()=>{});
   m.reply({ embeds: [okE('🔓 Unlocked')] });
 }};
 commands.hackban = { cat: 'Moderation', desc: 'Ban by ID', usage: 'hackban <userID>', async run(m, a) {
   const tier = getStaffTier(m.member);
-  if (!tier || !tier.canBan) return m.reply({ embeds: [helpE('Permission Required')] });
+  if (!tier || !tier.canBan) return m.reply({ embeds: [noPermE('hackban', 8, tier)] });
   if (!a[0]) return m.reply({ embeds: [usageE('hackban', '!hackban <userID>')] });
   try { await m.guild.bans.create(a[0], { reason: `${m.author.tag}: hackban` }); m.reply({ embeds: [okE('🔨 Hackbanned')] }); }
-  catch (e) { m.reply({ embeds: [helpE('Failed', e.message)] }); }
+  catch (err) { m.reply({ embeds: [reasonE('hackban', `Could not ban ID \`${a[0]}\`.`, err.message)] }); }
 }};
 
 commands.move = { cat: 'Moderation', desc: 'Move member', usage: 'move <@user> <#voice>', async run(m, a) {
   const tier = getStaffTier(m.member);
-  if (!tier) return m.reply({ embeds: [helpE('Permission Required')] });
-  if (!tier.canMove) return m.reply({ embeds: [errE('❌ Not Allowed')] });
+  if (!tier || !tier.canMove) return m.reply({ embeds: [noPermE('move', 2, tier)] });
   if (!a[0] || !a[1]) return m.reply({ embeds: [usageE('move', '!move <@user> <#voice>')] });
   const target = m.mentions.members.first() || await resolveMemberById(m.guild, a[0]);
-  if (!target) return m.reply({ embeds: [helpE('Member Not Found')] });
-  if (!canModerate(m.member, target)) return m.reply({ embeds: [errE('❌ Hierarchy Error')] });
+  if (!target) return m.reply({ embeds: [reasonE('move', `Member \`${a[0]}\` was not found.`)] });
+  if (!canModerate(m.member, target)) return m.reply({ embeds: [reasonE('move', `You can't move **${target.user.tag}** — their role is at or above yours.`)] });
   let destCh = m.mentions.channels.first();
   if (!destCh) {
     const chStr = a[1].trim().replace(/[<#>]/g, '');
     if (/^\d{17,20}$/.test(chStr)) destCh = m.guild.channels.cache.get(chStr);
   }
-  if (!destCh) return m.reply({ embeds: [helpE('Channel Not Found')] });
+  if (!destCh) return m.reply({ embeds: [reasonE('move', `Voice channel \`${a[1]}\` was not found.`)] });
   const fromCh = target.voice?.channel;
-  if (!fromCh) return m.reply({ embeds: [helpE('Not in Voice')] });
+  if (!fromCh) return m.reply({ embeds: [reasonE('move', `**${target.user.tag}** is not in a voice channel.`)] });
   try {
     await target.voice.setChannel(destCh, `Moved by ${m.author.tag}`);
     m.reply({ embeds: [okE('➡️ Moved', `${fromCh} → ${destCh}`)] });
-  } catch (err) { m.reply({ embeds: [errE('Failed', err.message)] }); }
+  } catch (err) { m.reply({ embeds: [reasonE('move', `Discord refused the move.`, err.message)] }); }
 }};
 
 commands.nickname = { cat: 'Members', desc: 'Change nickname', usage: 'nickname <@user> <name>', async run(m, a) {
   const tier = getStaffTier(m.member);
-  if (!tier || !tier.canNickname) return m.reply({ embeds: [helpE('Permission Required')] });
+  if (!tier || !tier.canNickname) return m.reply({ embeds: [noPermE('nickname', 7, tier)] });
   if (!a[0] || a.length < 2) return m.reply({ embeds: [usageE('nickname', '!nickname <@user> <name>')] });
   const target = m.mentions.members.first() || await resolveMemberById(m.guild, a[0]);
-  if (!target) return m.reply({ embeds: [helpE('Member Not Found')] });
-  if (!canModerate(m.member, target)) return m.reply({ embeds: [errE('❌ Hierarchy Error')] });
+  if (!target) return m.reply({ embeds: [reasonE('nickname', `Member \`${a[0]}\` was not found.`)] });
+  if (!canModerate(m.member, target)) return m.reply({ embeds: [reasonE('nickname', `You can't change **${target.user.tag}**'s nickname — their role is at or above yours.`)] });
   const nickname = a.slice(1).join(' ').trim().slice(0, 32);
   try { await target.setNickname(nickname, `By ${m.author.tag}`); m.reply({ embeds: [okE('✏️ Changed', `${target.user.tag} → ${nickname}`)] }); }
-  catch (err) { m.reply({ embeds: [errE('Failed', err.message)] }); }
+  catch (err) { m.reply({ embeds: [reasonE('nickname', `Discord refused the change.`, err.message)] }); }
 }};
 commands.resetnick = { cat: 'Members', desc: 'Reset nickname', usage: 'resetnick <@user>', async run(m, a) {
   const tier = getStaffTier(m.member);
-  if (!tier || !tier.canNickname) return m.reply({ embeds: [helpE('Permission Required')] });
+  if (!tier || !tier.canNickname) return m.reply({ embeds: [noPermE('resetnick', 7, tier)] });
   if (!a[0]) return m.reply({ embeds: [usageE('resetnick', '!resetnick <@user>')] });
   const target = m.mentions.members.first() || await resolveMemberById(m.guild, a[0]);
-  if (!target) return m.reply({ embeds: [helpE('Member Not Found')] });
+  if (!target) return m.reply({ embeds: [reasonE('resetnick', `Member \`${a[0]}\` was not found.`)] });
   try { await target.setNickname(null, `Reset by ${m.author.tag}`); m.reply({ embeds: [okE('↩️ Reset')] }); }
-  catch (err) { m.reply({ embeds: [errE('Failed', err.message)] }); }
+  catch (err) { m.reply({ embeds: [reasonE('resetnick', `Discord refused.`, err.message)] }); }
 }};
 
 commands.giveaway = { cat: 'Fun', desc: 'Start a giveaway', usage: 'giveaway <time> <winners> <prize>', async run(m, a) {
   const tier = getStaffTier(m.member);
-  if (!tier || !tier.canGiveaway) return m.reply({ embeds: [helpE('Permission Required')] });
-  if (a.length < 3) return m.reply({ embeds: [usageE('giveaway', '!giveaway <time> <winners> <prize>')] });
+  if (!tier || !tier.canGiveaway) return m.reply({ embeds: [noPermE('giveaway', 2, tier)] });
+  if (a.length < 3) return m.reply({ embeds: [usageE('giveaway', '!giveaway <time> <winners> <prize>', ['!giveaway 10m 1 Nitro'])] });
   const durationMs = parseDuration(a[0]);
-  if (!durationMs) return m.reply({ embeds: [helpE('Invalid Time')] });
+  if (!durationMs) return m.reply({ embeds: [reasonE('giveaway', `\`${a[0]}\` is not a valid duration.`, 'Examples: `10s`, `5m`, `2h`, `1d`')] });
   const winners = parseInt(a[1], 10);
-  if (isNaN(winners) || winners < 1 || winners > 50) return m.reply({ embeds: [helpE('Invalid Winners')] });
+  if (isNaN(winners) || winners < 1 || winners > 50) return m.reply({ embeds: [reasonE('giveaway', `The number of winners must be between 1 and 50.`)] });
   let rest = a.slice(2), imageURL = '';
   if (rest.length > 1 && /^https?:\/\/\S+/i.test(rest[rest.length - 1])) imageURL = rest.pop();
   if (!imageURL && m.attachments.size) imageURL = m.attachments.first().url;
   const prize = rest.join(' ').trim();
-  if (!prize) return m.reply({ embeds: [helpE('Missing Prize')] });
+  if (!prize) return m.reply({ embeds: [reasonE('giveaway', 'Please provide the prize name.')] });
   const gw = { guildId: m.guild.id, channelId: m.channel.id, hostId: m.author.id, prize, winners, imageURL, endsAt: Date.now() + durationMs, ended: false, entries: [], winnerIds: [] };
   let msg;
   try { msg = await m.channel.send({ embeds: [buildGiveawayEmbed(gw, false)] }); await msg.react('🎉'); }
-  catch (e) { return m.reply({ embeds: [errE('Failed', e.message)] }); }
+  catch (err) { return m.reply({ embeds: [reasonE('giveaway', `Could not send the giveaway message.`, err.message)] }); }
   activeGiveaways[msg.id] = gw;
   saveJson(path.join(DATA_DIR, 'giveaway-config.json'), activeGiveaways);
   giveawayTimers.set(msg.id, setTimeout(() => endGiveaway(msg.id).catch(()=>{}), durationMs));
@@ -1503,10 +1588,11 @@ commands.giveaway = { cat: 'Fun', desc: 'Start a giveaway', usage: 'giveaway <ti
 }};
 commands.gend = { cat: 'Fun', desc: 'End a giveaway', usage: 'gend <messageID>', async run(m, a) {
   const tier = getStaffTier(m.member);
-  if (!tier || !tier.canGiveaway) return m.reply({ embeds: [helpE('Permission Required')] });
+  if (!tier || !tier.canGiveaway) return m.reply({ embeds: [noPermE('gend', 2, tier)] });
   if (!a[0]) return m.reply({ embeds: [usageE('gend', '!gend <messageID>')] });
   const id = a[0].trim();
-  const gw = activeGiveaways[id]; if (!gw) return m.reply({ embeds: [helpE('Not Found')] });
+  const gw = activeGiveaways[id];
+  if (!gw) return m.reply({ embeds: [reasonE('gend', `No giveaway found with ID \`${id}\`.`)] });
   await endGiveaway(id);
   m.reply({ embeds: [okE('✅ Ended')] }).catch(()=>{});
 }};
@@ -1544,7 +1630,7 @@ commands.whois = commands.userinfo;
 commands.help = { cat: 'Utility', desc: 'Commands list', usage: 'help [command]', async run(m, a) {
   if (a[0]) {
     const c = commands[a[0].toLowerCase()];
-    if (!c) return m.reply({ embeds: [helpE('Command Not Found')] });
+    if (!c) return m.reply({ embeds: [reasonE('help', `Command \`!${a[0]}\` does not exist.`)] });
     return m.reply({ embeds: [infoE(`📖 ${PREFIX}${a[0]}`).addFields(
       { name: 'Category', value: c.cat, inline: true },
       { name: 'Usage', value: c.usage || `${PREFIX}${a[0]}`, inline: true },
@@ -1575,7 +1661,7 @@ commands.calculate = { cat: 'Utility', desc: 'Calculate', usage: 'calculate <exp
   const e = a.join(' ').replace(/[^0-9+\-*/(). %]/g, '');
   if (!e) return m.reply({ embeds: [usageE('calculate', '!calculate <expression>')] });
   try { m.reply({ embeds: [okE('🧮 Result', `\`${e}\` = **${Function(`"use strict"; return (${e});`)()}**`)] }); }
-  catch { m.reply({ embeds: [helpE('Invalid Expression')] }); }
+  catch { m.reply({ embeds: [reasonE('calculate', 'The expression is invalid.')] }); }
 }};
 commands.choose = { cat: 'Utility', desc: 'Choose random', usage: 'choose a b c', async run(m, a) {
   if (a.length < 2) return m.reply({ embeds: [usageE('choose', '!choose <opt1> <opt2>')] });
@@ -1593,24 +1679,24 @@ commands.serverstatus = { cat: 'SMP', desc: 'MC status', async run(m) {
     const r = await fetch(`https://api.mcsrvstat.us/3/${MC_SERVER_IP}`).then(x => x.json());
     if (!r.online) return m.reply({ embeds: [errE('Offline')] });
     m.reply({ embeds: [infoE('🎮 Status').addFields({ name: 'Players', value: `${r.players?.online ?? 0}/${r.players?.max ?? 0}` }, { name: 'Version', value: r.version || '?' })] });
-  } catch { m.reply({ embeds: [errE('API Error')] }); }
+  } catch { m.reply({ embeds: [reasonE('serverstatus', 'The MC server status API is not responding.')] }); }
 }};
 commands.rules = { cat: 'SMP', desc: 'Show rules', async run(m) { m.reply({ embeds: [infoE('📜 Rules', '1. Be respectful.\n2. No hacks.\n3. No griefing.\n4. No spam.\n5. Follow staff.')] }); }};
 commands.store = { cat: 'SMP', desc: 'Show store', async run(m) { m.reply({ embeds: [infoE('🛒 Store', MC_STORE_URL)] }); }};
 
 commands.addvoice = { cat: 'Voice', desc: 'Join voice 24/7', usage: 'addvoice <voiceChannelID>', async run(m, a) {
   const tier = getStaffTier(m.member);
-  if (!tier || tier.rank < 7) return m.reply({ embeds: [helpE('Permission Required')] });
+  if (!tier || tier.rank < 7) return m.reply({ embeds: [noPermE('addvoice', 7, tier)] });
   if (!a[0]) return m.reply({ embeds: [usageE('addvoice', '!addvoice <voiceChannelID>')] });
   const id = a[0].replace(/[<#>]/g, '').trim();
   const ch = m.guild.channels.cache.get(id) || await m.guild.channels.fetch(id).catch(()=>null);
-  if (!ch) return m.reply({ embeds: [helpE('Channel Not Found')] });
+  if (!ch) return m.reply({ embeds: [reasonE('addvoice', `Voice channel \`${id}\` was not found.`)] });
   try { await connectToVoice(m.guild, ch.id); voiceConfig[m.guild.id] = ch.id; saveJson(path.join(DATA_DIR, 'voice-config.json'), voiceConfig); m.reply({ embeds: [okE('🔊 Connected')] }); }
-  catch (e) { m.reply({ embeds: [errE('Failed', e.message)] }); }
+  catch (e) { m.reply({ embeds: [reasonE('addvoice', `Failed to connect to the voice channel.`, e.message)] }); }
 }};
 commands.removevoice = { cat: 'Voice', desc: 'Disconnect', async run(m) {
   const tier = getStaffTier(m.member);
-  if (!tier || tier.rank < 7) return m.reply({ embeds: [helpE('Permission Required')] });
+  if (!tier || tier.rank < 7) return m.reply({ embeds: [noPermE('removevoice', 7, tier)] });
   const conn = getVoiceConnection(m.guild.id);
   if (conn) { try { conn.destroy(); } catch {} }
   if (reconnectTimers.has(m.guild.id)) { clearTimeout(reconnectTimers.get(m.guild.id)); reconnectTimers.delete(m.guild.id); }
@@ -1666,8 +1752,9 @@ client.once('ready', async () => {
   console.log(`[READY] Guilds: ${client.guilds.cache.size}`);
   console.log(`[READY] 📁 DATA_DIR: ${DATA_DIR}`);
   console.log(`[READY] 🔐 SECURITY CODE: ${BOT_WHITELIST_CODE}`);
+  console.log(`[READY] 🎖️ Staff Tiers: ${STAFF_ROLES.length} ranks loaded`);
+  console.log(`[READY] 🔗 Link whitelist cmd: !wytlistlink <userID> <code>`);
   console.log(`[READY] 🔊 Join-to-Create: ${JOIN_TO_CREATE_CHANNEL_ID}`);
-  console.log(`[READY] 🎛️ Panel: inside each voice room's text chat (VOICE_PANEL_CHANNEL_ID disabled)`);
   console.log('==============================');
   client.user.setActivity('𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 🍞', { type: ActivityType.Watching });
   for (const guild of client.guilds.cache.values()) await cacheGuildInvites(guild);
@@ -1837,18 +1924,17 @@ client.on('guildMemberAdd', async member => {
  * ============================================================ */
 client.on(Events.InteractionCreate, async interaction => {
 
-  /* ============= MODAL SUBMITS ============= */
   if (interaction.isModalSubmit()) {
     const id = interaction.customId;
 
     if (id.startsWith('wyh_modal_')) {
       const targetId = id.replace('wyh_modal_', '');
       const code = interaction.fields.getTextInputValue('wyh_code').trim();
-      if (code !== BOT_WHITELIST_CODE) return interaction.reply({ embeds: [helpE('Invalid Code')], ephemeral: true });
+      if (code !== BOT_WHITELIST_CODE) return interaction.reply({ embeds: [errE('❌ Invalid Code', 'The security code is incorrect.')], ephemeral: true });
       const tier = getStaffTier(interaction.member);
-      if (!tier || tier.rank < 3) return interaction.reply({ embeds: [helpE('Permission')], ephemeral: true });
+      if (!tier || tier.rank < 3) return interaction.reply({ embeds: [noPermE('wyh', 3, tier)], ephemeral: true });
       const user = await client.users.fetch(targetId).catch(()=>null);
-      if (!user || !user.bot) return interaction.reply({ embeds: [helpE('Not a Bot')], ephemeral: true });
+      if (!user || !user.bot) return interaction.reply({ embeds: [reasonE('wyh', 'That is not a bot.')], ephemeral: true });
       botWhitelist.bots[targetId] = { addedBy: interaction.user.tag, addedAt: Date.now() };
       saveJson(path.join(DATA_DIR, 'bot-whitelist.json'), botWhitelist);
       await interaction.reply({ embeds: [okE('✅ Bot Whitelisted', `<@${targetId}>`)], ephemeral: true });
@@ -1859,22 +1945,21 @@ client.on(Events.InteractionCreate, async interaction => {
       const voiceId = id.replace('vc_rename_modal_', '');
       const newName = interaction.fields.getTextInputValue('new_name').trim().slice(0, 100);
       const room = tempRooms.get(voiceId);
-      if (!room) return interaction.reply({ embeds: [errE('❌ Room no longer exists')], ephemeral: true });
-      if (room.ownerId !== interaction.user.id) return interaction.reply({ embeds: [errE('❌ You are not the owner')], ephemeral: true });
+      if (!room) return interaction.reply({ embeds: [reasonE('vc_rename', 'This temp room no longer exists.')], ephemeral: true });
+      if (room.ownerId !== interaction.user.id) return interaction.reply({ embeds: [reasonE('vc_rename', 'You are not the owner of this room.')], ephemeral: true });
       try {
         const ch = interaction.guild.channels.cache.get(voiceId);
         if (ch) await ch.setName(newName, `Renamed by ${interaction.user.tag}`);
         room.name = newName;
         await updateRoomPanel(voiceId);
         await interaction.reply({ embeds: [okE('✅ Renamed', `\`${newName}\``)], ephemeral: true });
-      } catch (e) { interaction.reply({ embeds: [errE('Failed', e.message)], ephemeral: true }); }
+      } catch (e) { interaction.reply({ embeds: [reasonE('vc_rename', 'Discord refused the change.', e.message)], ephemeral: true }); }
       return;
     }
 
     return;
   }
 
-  /* ============= SELECT MENUS ============= */
   if (interaction.isStringSelectMenu()) {
     const id = interaction.customId;
 
@@ -1882,15 +1967,15 @@ client.on(Events.InteractionCreate, async interaction => {
       const voiceId = id.replace('vc_kick_select_', '');
       const targetId = interaction.values[0];
       const room = tempRooms.get(voiceId);
-      if (!room) return interaction.update({ embeds: [errE('❌ Room no longer exists')], components: [] });
-      if (room.ownerId !== interaction.user.id) return interaction.update({ embeds: [errE('❌ You are not the owner')], components: [] });
+      if (!room) return interaction.update({ embeds: [reasonE('vc_kick', 'This room no longer exists.')], components: [] });
+      if (room.ownerId !== interaction.user.id) return interaction.update({ embeds: [reasonE('vc_kick', 'You are not the owner.')], components: [] });
       try {
         const member = await interaction.guild.members.fetch(targetId).catch(()=>null);
         if (!member || !member.voice?.channelId || member.voice.channelId !== voiceId)
-          return interaction.update({ embeds: [errE('❌ User not in room')], components: [] });
+          return interaction.update({ embeds: [reasonE('vc_kick', 'That user is not in your room.')], components: [] });
         await member.voice.disconnect('Kicked by room owner').catch(()=>{});
         await interaction.update({ embeds: [okE('👢 Kicked', `<@${targetId}>`)] });
-      } catch (e) { interaction.update({ embeds: [errE('Failed', e.message)], components: [] }); }
+      } catch (e) { interaction.update({ embeds: [reasonE('vc_kick', 'Discord refused.', e.message)], components: [] }); }
       return;
     }
 
@@ -1898,8 +1983,8 @@ client.on(Events.InteractionCreate, async interaction => {
       const voiceId = id.replace('vc_permit_select_', '');
       const targetId = interaction.values[0];
       const room = tempRooms.get(voiceId);
-      if (!room) return interaction.update({ embeds: [errE('❌ Room no longer exists')], components: [] });
-      if (room.ownerId !== interaction.user.id) return interaction.update({ embeds: [errE('❌ You are not the owner')], components: [] });
+      if (!room) return interaction.update({ embeds: [reasonE('vc_permit', 'This room no longer exists.')], components: [] });
+      if (room.ownerId !== interaction.user.id) return interaction.update({ embeds: [reasonE('vc_permit', 'You are not the owner.')], components: [] });
       room.allowed.add(targetId);
       try {
         const ch = interaction.guild.channels.cache.get(voiceId);
@@ -1914,8 +1999,8 @@ client.on(Events.InteractionCreate, async interaction => {
       const voiceId = id.replace('vc_deny_select_', '');
       const targetId = interaction.values[0];
       const room = tempRooms.get(voiceId);
-      if (!room) return interaction.update({ embeds: [errE('❌ Room no longer exists')], components: [] });
-      if (room.ownerId !== interaction.user.id) return interaction.update({ embeds: [errE('❌ You are not the owner')], components: [] });
+      if (!room) return interaction.update({ embeds: [reasonE('vc_deny', 'This room no longer exists.')], components: [] });
+      if (room.ownerId !== interaction.user.id) return interaction.update({ embeds: [reasonE('vc_deny', 'You are not the owner.')], components: [] });
       room.allowed.delete(targetId);
       try {
         const ch = interaction.guild.channels.cache.get(voiceId);
@@ -1930,12 +2015,12 @@ client.on(Events.InteractionCreate, async interaction => {
       const voiceId = id.replace('vc_claim_select_', '');
       const targetId = interaction.values[0];
       const room = tempRooms.get(voiceId);
-      if (!room) return interaction.update({ embeds: [errE('❌ Room no longer exists')], components: [] });
-      if (room.ownerId !== interaction.user.id) return interaction.update({ embeds: [errE('❌ You are not the owner')], components: [] });
+      if (!room) return interaction.update({ embeds: [reasonE('vc_claim', 'This room no longer exists.')], components: [] });
+      if (room.ownerId !== interaction.user.id) return interaction.update({ embeds: [reasonE('vc_claim', 'You are not the owner.')], components: [] });
       try {
         const oldOwner = await interaction.guild.members.fetch(room.ownerId).catch(()=>null);
         const newOwner = await interaction.guild.members.fetch(targetId).catch(()=>null);
-        if (!newOwner) return interaction.update({ embeds: [errE('❌ User not found')], components: [] });
+        if (!newOwner) return interaction.update({ embeds: [reasonE('vc_claim', 'New owner was not found.')], components: [] });
         const ch = interaction.guild.channels.cache.get(voiceId);
         if (ch) {
           if (oldOwner) {
@@ -1951,31 +2036,28 @@ client.on(Events.InteractionCreate, async interaction => {
         room.ownerId = newOwner.id;
         await updateRoomPanel(voiceId);
         await interaction.update({ embeds: [okE('👑 Transferred', `<@${targetId}>`)] });
-      } catch (e) { interaction.update({ embeds: [errE('Failed', e.message)], components: [] }); }
+      } catch (e) { interaction.update({ embeds: [reasonE('vc_claim', 'Discord refused.', e.message)], components: [] }); }
       return;
     }
 
     return;
   }
 
-  /* ============= BUTTONS ============= */
   if (!interaction.isButton()) return;
   const btnId = interaction.customId;
 
-  /* ============ TEMP VOICE ROOM BUTTONS ============ */
   if (btnId.startsWith('vc_')) {
     const parts = btnId.split('_');
     const action = parts[1];
     const voiceId = parts.slice(2).join('_');
-
     const room = tempRooms.get(voiceId);
-    if (!room) return interaction.reply({ embeds: [errE('❌ Room no longer exists')], ephemeral: true });
+    if (!room) return interaction.reply({ embeds: [reasonE('vc_' + action, 'This room no longer exists.')], ephemeral: true });
 
     const isOwner = interaction.user.id === room.ownerId;
     const isAdmin = interaction.member.permissions.has(PermissionFlagsBits.Administrator);
     const isServerOwner = interaction.user.id === interaction.guild.ownerId;
     if (!isOwner && !isAdmin && !isServerOwner) {
-      return interaction.reply({ embeds: [errE('❌ You are not the owner — only the room owner can use this panel')], ephemeral: true });
+      return interaction.reply({ embeds: [reasonE('vc_' + action, 'You are not the owner of this room. Only the owner can use these buttons.')], ephemeral: true });
     }
 
     if (action === 'lock') {
@@ -2007,9 +2089,9 @@ client.on(Events.InteractionCreate, async interaction => {
     if (action === 'kick') {
       try {
         const ch = interaction.guild.channels.cache.get(voiceId);
-        if (!ch) return interaction.reply({ embeds: [errE('Room not found')], ephemeral: true });
+        if (!ch) return interaction.reply({ embeds: [reasonE('vc_kick', 'Room not found.')], ephemeral: true });
         const members = ch.members.filter(m => m.id !== room.ownerId && !m.user.bot);
-        if (!members.size) return interaction.reply({ embeds: [infoE('No one else is in the room')], ephemeral: true });
+        if (!members.size) return interaction.reply({ embeds: [reasonE('vc_kick', 'No one else is in the room.')], ephemeral: true });
         const menu = new StringSelectMenuBuilder()
           .setCustomId(`vc_kick_select_${voiceId}`)
           .setPlaceholder('Select a user to kick')
@@ -2020,7 +2102,7 @@ client.on(Events.InteractionCreate, async interaction => {
           );
         const row = new ActionRowBuilder().addComponents(menu);
         await interaction.reply({ content: 'Select a user:', components: [row], ephemeral: true });
-      } catch (e) { interaction.reply({ embeds: [errE('Failed', e.message)], ephemeral: true }); }
+      } catch (e) { interaction.reply({ embeds: [reasonE('vc_kick', 'Discord refused.', e.message)], ephemeral: true }); }
       return;
     }
 
@@ -2042,9 +2124,9 @@ client.on(Events.InteractionCreate, async interaction => {
     if (action === 'permit') {
       try {
         const ch = interaction.guild.channels.cache.get(voiceId);
-        if (!ch) return interaction.reply({ embeds: [errE('Room not found')], ephemeral: true });
+        if (!ch) return interaction.reply({ embeds: [reasonE('vc_permit', 'Room not found.')], ephemeral: true });
         const members = ch.members.filter(m => !room.allowed.has(m.id) && m.id !== room.ownerId && !m.user.bot);
-        if (!members.size) return interaction.reply({ embeds: [infoE('Everyone is already permitted')], ephemeral: true });
+        if (!members.size) return interaction.reply({ embeds: [reasonE('vc_permit', 'Everyone in the room is already permitted.')], ephemeral: true });
         const menu = new StringSelectMenuBuilder()
           .setCustomId(`vc_permit_select_${voiceId}`)
           .setPlaceholder('Select a user to permit')
@@ -2055,12 +2137,12 @@ client.on(Events.InteractionCreate, async interaction => {
           );
         const row = new ActionRowBuilder().addComponents(menu);
         await interaction.reply({ content: 'Select a user:', components: [row], ephemeral: true });
-      } catch (e) { interaction.reply({ embeds: [errE('Failed', e.message)], ephemeral: true }); }
+      } catch (e) { interaction.reply({ embeds: [reasonE('vc_permit', 'Discord refused.', e.message)], ephemeral: true }); }
       return;
     }
 
     if (action === 'deny') {
-      if (!room.allowed.size) return interaction.reply({ embeds: [infoE('No permitted users')], ephemeral: true });
+      if (!room.allowed.size) return interaction.reply({ embeds: [reasonE('vc_deny', 'No permitted users in this room.')], ephemeral: true });
       const menu = new StringSelectMenuBuilder()
         .setCustomId(`vc_deny_select_${voiceId}`)
         .setPlaceholder('Select a user to deny')
@@ -2077,9 +2159,9 @@ client.on(Events.InteractionCreate, async interaction => {
     if (action === 'claim') {
       try {
         const ch = interaction.guild.channels.cache.get(voiceId);
-        if (!ch) return interaction.reply({ embeds: [errE('Room not found')], ephemeral: true });
+        if (!ch) return interaction.reply({ embeds: [reasonE('vc_claim', 'Room not found.')], ephemeral: true });
         const members = ch.members.filter(m => m.id !== room.ownerId && !m.user.bot);
-        if (!members.size) return interaction.reply({ embeds: [infoE('No one else in room')], ephemeral: true });
+        if (!members.size) return interaction.reply({ embeds: [reasonE('vc_claim', 'No one else in the room to transfer ownership to.')], ephemeral: true });
         const menu = new StringSelectMenuBuilder()
           .setCustomId(`vc_claim_select_${voiceId}`)
           .setPlaceholder('Select the new owner')
@@ -2090,25 +2172,27 @@ client.on(Events.InteractionCreate, async interaction => {
           );
         const row = new ActionRowBuilder().addComponents(menu);
         await interaction.reply({ content: 'Select a user:', components: [row], ephemeral: true });
-      } catch (e) { interaction.reply({ embeds: [errE('Failed', e.message)], ephemeral: true }); }
+      } catch (e) { interaction.reply({ embeds: [reasonE('vc_claim', 'Discord refused.', e.message)], ephemeral: true }); }
       return;
     }
 
     return;
   }
 
-  /* ============ OTHER BUTTONS ============ */
   if (btnId.startsWith('ticket_') && !['ticket_close', 'ticket_claim'].includes(btnId)) {
     const typeKey = btnId.replace('ticket_', '');
-    if (!TICKET_TYPES[typeKey]) return interaction.reply({ embeds: [helpE('Invalid Type')], ephemeral: true });
+    if (!TICKET_TYPES[typeKey]) return interaction.reply({ embeds: [reasonE('ticket', 'Unknown ticket type.')], ephemeral: true });
     await interaction.deferReply({ ephemeral: true });
     const result = await createTicket(interaction.guild, interaction.user, typeKey);
-    if (!result.ok) return interaction.editReply({ embeds: [errE('Failed', result.reason)] });
+    if (!result.ok) {
+      if (result.reason === 'already_open') return interaction.editReply({ embeds: [reasonE('ticket', `You already have an open ticket.`, `Go to ${result.channel}`)] });
+      return interaction.editReply({ embeds: [reasonE('ticket', 'Failed to create the ticket.', result.reason)] });
+    }
     return interaction.editReply({ embeds: [okE('✅ Created', `${result.channel}`)] });
   }
   if (btnId === 'ticket_close') {
     const ticket = ticketConfig.tickets[interaction.channel.id];
-    if (!ticket) return interaction.reply({ embeds: [helpE('Not a Ticket')], ephemeral: true });
+    if (!ticket) return interaction.reply({ embeds: [reasonE('ticket_close', 'This channel is not an open ticket.')], ephemeral: true });
     await interaction.reply({ embeds: [new EmbedBuilder().setColor(0xed4245).setTitle('🔒 Closing')] });
     delete ticketConfig.tickets[interaction.channel.id];
     saveJson(path.join(DATA_DIR, 'ticket-config.json'), ticketConfig);
@@ -2117,8 +2201,8 @@ client.on(Events.InteractionCreate, async interaction => {
   }
   if (btnId === 'ticket_claim') {
     const ticket = ticketConfig.tickets[interaction.channel.id];
-    if (!ticket) return interaction.reply({ embeds: [helpE('Not a Ticket')], ephemeral: true });
-    if (ticket.claimedBy) return interaction.reply({ embeds: [infoE('Already Claimed')], ephemeral: true });
+    if (!ticket) return interaction.reply({ embeds: [reasonE('ticket_claim', 'This channel is not an open ticket.')], ephemeral: true });
+    if (ticket.claimedBy) return interaction.reply({ embeds: [reasonE('ticket_claim', `This ticket is already claimed by <@${ticket.claimedBy}>.`)], ephemeral: true });
     ticket.claimedBy = interaction.user.id;
     saveJson(path.join(DATA_DIR, 'ticket-config.json'), ticketConfig);
     await interaction.reply({ embeds: [okE('📌 Claimed')] });
@@ -2127,11 +2211,11 @@ client.on(Events.InteractionCreate, async interaction => {
   if (btnId === 'verify_button') {
     try {
       const member = await interaction.guild.members.fetch(interaction.user.id);
-      if (member.roles.cache.has(VERIFIED_ROLE_ID)) return interaction.reply({ embeds: [infoE('Already Verified')], ephemeral: true });
+      if (member.roles.cache.has(VERIFIED_ROLE_ID)) return interaction.reply({ embeds: [reasonE('verify', 'You are already verified.')], ephemeral: true });
       await member.roles.add(VERIFIED_ROLE_ID, 'Verified');
       if (UNVERIFIED_ROLE_ID && member.roles.cache.has(UNVERIFIED_ROLE_ID)) await member.roles.remove(UNVERIFIED_ROLE_ID, 'Verified').catch(()=>{});
       await interaction.reply({ embeds: [okE('✅ Verified!')], ephemeral: true });
-    } catch (e) {}
+    } catch (e) { interaction.reply({ embeds: [reasonE('verify', 'Discord refused the role change.', e.message)], ephemeral: true }).catch(()=>{}); }
     return;
   }
   if (btnId === 'apply_minecraft' || btnId === 'apply_discord') {
@@ -2139,19 +2223,22 @@ client.on(Events.InteractionCreate, async interaction => {
     const isMc = btnId === 'apply_minecraft';
     const type = isMc ? 'Minecraft Staff' : 'Discord Staff';
     const questions = isMc ? APPLY_QUESTIONS_MC : APPLY_QUESTIONS_DISCORD;
-    if (dmApplications.has(userId)) return interaction.reply({ embeds: [infoE('Already Applying')], ephemeral: true });
+    if (dmApplications.has(userId)) return interaction.reply({ embeds: [reasonE('apply', 'You are already applying.')], ephemeral: true });
     try {
       const dm = await interaction.user.createDM();
       dmApplications.set(userId, { type, step: 0, answers: {}, guildId: interaction.guild.id, questions });
       await interaction.reply({ embeds: [okE('📩 DM Sent')], ephemeral: true });
       await dm.send({ embeds: [new EmbedBuilder().setColor(C.info).setTitle(`📝 Application — ${type}`)
         .setDescription(`**Q1/${questions.length}:** ${questions[0].q}\n\nType \`cancel\` to abort.`)] });
-    } catch (e) { dmApplications.delete(userId); return interaction.reply({ embeds: [helpE('Cannot DM')], ephemeral: true }); }
+    } catch (e) {
+      dmApplications.delete(userId);
+      return interaction.reply({ embeds: [reasonE('apply', 'I cannot send you a DM.', 'Please enable DMs from server members.')], ephemeral: true });
+    }
     return;
   }
   if (btnId.startsWith('apply_accept_')) {
     const tier = getStaffTier(interaction.member);
-    if (!tier || tier.rank < 3) return interaction.reply({ embeds: [helpE('Permission')], ephemeral: true });
+    if (!tier || tier.rank < 3) return interaction.reply({ embeds: [noPermE('apply_accept', 3, tier)], ephemeral: true });
     const userId = btnId.replace('apply_accept_', '');
     try {
       const user = await client.users.fetch(userId).catch(()=>null);
@@ -2163,7 +2250,7 @@ client.on(Events.InteractionCreate, async interaction => {
   }
   if (btnId.startsWith('apply_reject_')) {
     const tier = getStaffTier(interaction.member);
-    if (!tier || tier.rank < 3) return interaction.reply({ embeds: [helpE('Permission')], ephemeral: true });
+    if (!tier || tier.rank < 3) return interaction.reply({ embeds: [noPermE('apply_reject', 3, tier)], ephemeral: true });
     const userId = btnId.replace('apply_reject_', '');
     try {
       const user = await client.users.fetch(userId).catch(()=>null);
@@ -2204,12 +2291,8 @@ client.on('messageReactionRemove', async (reaction, user) => {
   } catch (e) {}
 });
 
-/* ============================================================
- *  🔊 VOICE STATE
- * ============================================================ */
+/* VOICE STATE */
 client.on('voiceStateUpdate', async (oldState, newState) => {
-
-  /* ---- VOICE LOCK (girls rooms) ---- */
   if (newState.channelId && VOICE_LOCK_CHANNELS.includes(newState.channelId)) {
     const member = newState.member;
     if (member && !member.user.bot && member.id !== newState.guild.ownerId) {
@@ -2229,8 +2312,6 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
       }
     }
   }
-
-  /* ---- JOIN TO CREATE ---- */
   if (newState.channelId === JOIN_TO_CREATE_CHANNEL_ID && newState.member && !newState.member.user.bot) {
     try {
       const trigger = newState.channel;
@@ -2238,22 +2319,16 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
     } catch (e) { console.error('[TEMP-VOICE] create:', e.message); }
     return;
   }
-
-  /* ---- TEMP ROOM CLEANUP ---- */
   if (oldState.channelId && tempRooms.has(oldState.channelId)) {
     const chId = oldState.channelId;
     setTimeout(async () => {
       try {
         const ch = client.channels.cache.get(chId);
         if (!ch) { tempRooms.delete(chId); return; }
-        if (ch.members.size === 0) {
-          await deleteTempRoom(chId, 'Empty — auto cleanup');
-        }
+        if (ch.members.size === 0) await deleteTempRoom(chId, 'Empty — auto cleanup');
       } catch (e) {}
     }, 1500);
   }
-
-  /* ---- Bot 24/7 reconnect ---- */
   if (newState.id === client.user.id && newState.guild) {
     const saved = voiceConfig[newState.guild.id];
     if (!saved) return;
@@ -2266,12 +2341,10 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
     }
     return;
   }
-
   const key = `${newState.guild?.id}:${newState.id}`;
   if (activeMutes[key] && newState.channelId && !newState.serverMute) {
     try { await newState.setMute(true, 'Restoring mute'); } catch {}
   }
-
   if (!newState.guild) return;
   if (!newState.member || newState.member.user.bot) return;
 });
@@ -2369,13 +2442,12 @@ client.on('messageCreate', async message => {
   if (name === 'role' && args[0]?.toLowerCase() === 'all' && args[1]?.toLowerCase() === 'info') return commands.staffinfo.run(message, []);
 
   const cmd = commands[name];
-  if (!cmd) {
-    return message.reply({ content: 'صبب' }).catch(()=>{});
-  }
+  if (!cmd) return message.reply({ content: 'صبب' }).catch(()=>{});
+
   try { await cmd.run(message, args, client); }
   catch (e) {
     console.error(`[CMD ERR] ${name}:`, e);
-    message.reply({ embeds: [errE('❌ Error', (e.message || 'Unknown').slice(0, 500))] }).catch(()=>{});
+    message.reply({ embeds: [reasonE(name, `Unexpected error while running the command.`, e.message?.slice(0, 300) || 'Unknown')] }).catch(()=>{});
   }
 });
 
