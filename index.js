@@ -1,12 +1,11 @@
 /* ============================================================
  *  𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷 Discord Bot — Full Version
+ *  - 🛡️ EVERYONE must send ban/kick requests (even Owner)
+ *  - 👑 Only Server Owner can approve/reject
  *  - !wytlistlink <userID> <code> → link whitelist
- *  - !roll info → staff roles + their permissions
- *  - Staff tier system working per-role
- *  - Join to Create temp voice rooms + ENGLISH panel
+ *  - !roll info → staff roles + permissions
+ *  - Join to Create temp voice rooms
  *  - Unknown command → "صبب"
- *  - Detailed reasons on command failure
- *  - HARD PROTECTION: channel/role delete + ban + kick → auto-ban
  *  - SECURITY CODE = 1325
  * ============================================================ */
 require('dotenv').config();
@@ -43,6 +42,8 @@ const GENERAL_LOG_CHANNEL_ID     = '';
 
 const INVITE_LOG_CHANNEL_ID      = '1559560043614044190';
 const PERMA_LOG_CHANNEL_ID       = '1558158791659229354';
+
+const REQUEST_CHANNEL_ID         = '1560636876392505435';
 
 const MANUAL_MOVE_LOG_CHANNEL_ID = '1558625461821640808';
 const MANUAL_BAN_LOG_CHANNEL_ID  = '1559282035502358649';
@@ -87,6 +88,7 @@ const JOIN_TO_CREATE_CHANNEL_ID = '1558112136159297617';
 const VOICE_PANEL_CHANNEL_ID    = null;
 
 const tempRooms = new Map();
+const pendingRequests = new Map();
 
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 
@@ -106,7 +108,7 @@ const client = new Client({
   partials: [Partials.Channel, Partials.Message, Partials.GuildMember, Partials.User, Partials.Reaction]
 });
 
-const C = { ok: 0x57f287, err: 0xed4245, info: 0x5865f2, warn: 0xfee75c, giveaway: 0xeb459e, dark: 0x2b2d31, perma: 0xff0000, voice: 0x9b59b6 };
+const C = { ok: 0x57f287, err: 0xed4245, info: 0x5865f2, warn: 0xfee75c, giveaway: 0xeb459e, dark: 0x2b2d31, perma: 0xff0000, voice: 0x9b59b6, request: 0xf0a500 };
 
 const TICKET_TYPES = {
   pub:    { id: 'pub',    label: 'Pub',    emoji: '🔥', title: 'Pub Report',             desc: 'Report spam or pub',         color: 0xed4245 },
@@ -146,7 +148,6 @@ const dmApplications = new Map();
 
 /* ============================================================
  *  🎖️ STAFF TIER SYSTEM
- *  Rank 1 = Helper  (lowest)  →  Rank 8 = Owner (highest)
  * ============================================================ */
 const STAFF_ROLES = [
   { id: HELPER_ROLE_ID,  rank: 1, maxMute: 10,  minMute: 5,
@@ -160,32 +161,32 @@ const STAFF_ROLES = [
     canDanger: false, canAccessPanel: true, label: 'Moderator' },
 
   { id: ADMIN_ROLE_ID,   rank: 3, maxMute: 30,  minMute: 5,
-    canMove: true,  canTimeout: false, canNickname: false, canBan: false, canKick: true, canGiveaway: true,
+    canMove: true,  canTimeout: false, canNickname: false, canBan: false, canKick: false, canGiveaway: true,
     canWarn: true, canPurge: true, canMute: true, canLock: true, canSlowmode: true,
     canDanger: false, canAccessPanel: true, label: 'Admin' },
 
   { id: SENIOR_ROLE_ID,  rank: 4, maxMute: 60,  minMute: 5,
-    canMove: true,  canTimeout: false, canNickname: false, canBan: false, canKick: true, canGiveaway: true,
+    canMove: true,  canTimeout: false, canNickname: false, canBan: false, canKick: false, canGiveaway: true,
     canWarn: true, canPurge: true, canMute: true, canLock: true, canSlowmode: true,
     canDanger: false, canAccessPanel: true, label: 'Senior' },
 
   { id: MANAGER_ROLE_ID, rank: 5, maxMute: -1,  minMute: 5,
-    canMove: true,  canTimeout: false, canNickname: false, canBan: false, canKick: true, canGiveaway: true,
+    canMove: true,  canTimeout: false, canNickname: false, canBan: false, canKick: false, canGiveaway: true,
     canWarn: true, canPurge: true, canMute: true, canLock: true, canSlowmode: true,
     canDanger: false, canAccessPanel: true, label: 'Manager' },
 
   { id: HEAD_ROLE_ID,    rank: 6, maxMute: -1,  minMute: 5,
-    canMove: true,  canTimeout: true,  canNickname: false, canBan: false, canKick: true, canGiveaway: true,
+    canMove: true,  canTimeout: true,  canNickname: false, canBan: false, canKick: false, canGiveaway: true,
     canWarn: true, canPurge: true, canMute: true, canLock: true, canSlowmode: true,
     canDanger: false, canAccessPanel: true, label: 'Head Admin' },
 
   { id: COOWNER_ROLE_ID, rank: 7, maxMute: -1,  minMute: 5,
-    canMove: true,  canTimeout: true,  canNickname: true,  canBan: false, canKick: true, canGiveaway: true,
+    canMove: true,  canTimeout: true,  canNickname: true,  canBan: false, canKick: false, canGiveaway: true,
     canWarn: true, canPurge: true, canMute: true, canLock: true, canSlowmode: true,
     canDanger: false, canAccessPanel: true, label: 'Co-Owner' },
 
   { id: OWNER_ROLE_ID,   rank: 8, maxMute: -1,  minMute: 5,
-    canMove: true,  canTimeout: true,  canNickname: true,  canBan: true,  canKick: true, canGiveaway: true,
+    canMove: true,  canTimeout: true,  canNickname: true,  canBan: false, canKick: false, canGiveaway: true,
     canWarn: true, canPurge: true, canMute: true, canLock: true, canSlowmode: true,
     canDanger: true, canAccessPanel: true, label: 'Owner' }
 ];
@@ -764,12 +765,136 @@ async function deleteTempRoom(voiceId, reason = 'Empty') {
 }
 
 /* ============================================================
+ *  🛡️ BAN/KICK REQUEST SYSTEM — Only Server Owner can approve
+ * ============================================================ */
+async function createActionRequest(guild, type, requester, target, reason) {
+  /* type: 'ban' | 'kick' */
+  const requesterTier = getStaffTier(requester);
+  const targetMember = await guild.members.fetch(target.id).catch(()=>null);
+
+  if (target.id === requester.id) return { ok: false, reason: 'You cannot request against yourself.' };
+  if (target.id === guild.ownerId) return { ok: false, reason: 'You cannot request against the Server Owner.' };
+  if (target.id === client.user.id) return { ok: false, reason: 'You cannot request against the bot.' };
+
+  /* Hierarchy check (target must be lower than requester if requester has staff role) */
+  if (requesterTier && targetMember && requester.roles.highest.position <= targetMember.roles.highest.position) {
+    return { ok: false, reason: `Your role is not higher than **${target.tag}**'s role.` };
+  }
+
+  const channel = guild.channels.cache.get(REQUEST_CHANNEL_ID) || await guild.channels.fetch(REQUEST_CHANNEL_ID).catch(()=>null);
+  if (!channel || !channel.isTextBased()) {
+    return { ok: false, reason: 'Request channel was not found or is not a text channel.' };
+  }
+
+  const isBan = type === 'ban';
+  const requesterLabel = requesterTier
+    ? `${requesterTier.label} (Rank ${requesterTier.rank})`
+    : (requester.id === guild.ownerId ? '👑 Server Owner' : 'Non-staff');
+
+  const embed = new EmbedBuilder()
+    .setColor(C.request)
+    .setTitle(isBan ? '🛡️ BAN REQUEST — Approval Required' : '🛡️ KICK REQUEST — Approval Required')
+    .setDescription(
+      `**A member is requesting to ${type} a user.**\n\n` +
+      `⚠️ This action requires approval from the **Server Owner**.\n` +
+      `Only the **Server Owner** can **Approve** or **Reject** this request.`
+    )
+    .addFields(
+      { name: '👤 Target', value: `<@${target.id}> (\`${target.id}\`)\n\`${target.tag}\``, inline: false },
+      { name: '👮 Requested by', value: `${requester.user.tag} (\`${requester.id}\`)\n**Rank:** ${requesterLabel}`, inline: false },
+      { name: '📝 Reason', value: reason || '*No reason provided*', inline: false },
+      { name: '⏰ Requested at', value: `<t:${Math.floor(Date.now()/1000)}:R>`, inline: true },
+      { name: '📊 Action', value: isBan ? '**🔨 Ban**' : '**👢 Kick**', inline: true }
+    )
+    .setThumbnail(target.displayAvatarURL({ size: 256 }))
+    .setFooter({ text: '👑 Only the Server Owner can approve/reject' })
+    .setTimestamp();
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`req_approve_${target.id}`).setLabel('Approve').setEmoji('✅').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`req_reject_${target.id}`).setLabel('Reject').setEmoji('❌').setStyle(ButtonStyle.Danger)
+  );
+
+  let msg;
+  try {
+    msg = await channel.send({
+      content: `<@${guild.ownerId}> — new **${type}** request!`,
+      embeds: [embed],
+      components: [row]
+    });
+  } catch (e) {
+    return { ok: false, reason: 'Failed to send the request to the request channel.' };
+  }
+
+  pendingRequests.set(msg.id, {
+    type,
+    targetId: target.id,
+    targetTag: target.tag,
+    requesterId: requester.id,
+    requesterTag: requester.user.tag,
+    requesterRoleLabel: requesterLabel,
+    reason: reason || 'No reason',
+    guildId: guild.id,
+    createdAt: Date.now()
+  });
+
+  return { ok: true, messageId: msg.id };
+}
+
+/* ============================================================
  *                       COMMANDS
  * ============================================================ */
 const commands = {};
 
 /* ============================================================
- *  🔗 !wytlistlink <@user|userID> <code> — allow link posting
+ *  🛡️ !ban <@user|userID> <reason> — ALWAYS a request
+ *  Nobody can ban directly. Even Owner must request.
+ * ============================================================ */
+commands.ban = {
+  cat: 'Moderation',
+  desc: 'Send a ban request (requires Server Owner approval)',
+  usage: 'ban <@user|userID> <reason>',
+  async run(m, a) {
+    if (!a[0]) return m.reply({ embeds: [usageE('ban', '!ban <@user|userID> <reason>', ['!ban 123456789012345678 spam'])] });
+    if (a.length < 2) return m.reply({ embeds: [reasonE('ban', 'Please provide a reason for the ban request.')] });
+
+    const t = (await resolveMember(m, a[0])) || (await resolveMemberById(m.guild, a[0]));
+    const targetUser = t?.user || await client.users.fetch(String(a[0]).replace(/[<@!>]/g, '')).catch(()=>null);
+    if (!targetUser) return m.reply({ embeds: [reasonE('ban', `User \`${a[0]}\` was not found.`)] });
+
+    const reason = a.slice(1).join(' ').trim();
+    const result = await createActionRequest(m.guild, 'ban', m.member, targetUser, reason);
+    if (!result.ok) return m.reply({ embeds: [reasonE('ban', result.reason)] });
+
+    m.reply({ embeds: [okE('🛡️ Ban Request Sent', `Your request has been sent to <#${REQUEST_CHANNEL_ID}>.\n\n👑 **Only the Server Owner** can approve or reject it.\n\n⏳ Please wait.`)] });
+  }
+};
+
+/* ============================================================
+ *  🛡️ !kick <@user|userID> <reason> — ALWAYS a request
+ * ============================================================ */
+commands.kick = {
+  cat: 'Moderation',
+  desc: 'Send a kick request (requires Server Owner approval)',
+  usage: 'kick <@user|userID> <reason>',
+  async run(m, a) {
+    if (!a[0]) return m.reply({ embeds: [usageE('kick', '!kick <@user|userID> <reason>', ['!kick 123456789012345678 spam'])] });
+    if (a.length < 2) return m.reply({ embeds: [reasonE('kick', 'Please provide a reason for the kick request.')] });
+
+    const t = (await resolveMember(m, a[0])) || (await resolveMemberById(m.guild, a[0]));
+    const targetUser = t?.user || await client.users.fetch(String(a[0]).replace(/[<@!>]/g, '')).catch(()=>null);
+    if (!targetUser) return m.reply({ embeds: [reasonE('kick', `User \`${a[0]}\` was not found.`)] });
+
+    const reason = a.slice(1).join(' ').trim();
+    const result = await createActionRequest(m.guild, 'kick', m.member, targetUser, reason);
+    if (!result.ok) return m.reply({ embeds: [reasonE('kick', result.reason)] });
+
+    m.reply({ embeds: [okE('🛡️ Kick Request Sent', `Your request has been sent to <#${REQUEST_CHANNEL_ID}>.\n\n👑 **Only the Server Owner** can approve or reject it.\n\n⏳ Please wait.`)] });
+  }
+};
+
+/* ============================================================
+ *  🔗 !wytlistlink <@user|userID> <code>
  * ============================================================ */
 commands.wytlistlink = {
   cat: 'Security',
@@ -857,7 +982,7 @@ commands.wytlist = {
 };
 
 /* ============================================================
- *  🎖️ !roll info / !roll all info — SHOW STAFF PERMISSIONS
+ *  🎖️ !roll info / !staffinfo
  * ============================================================ */
 commands['roll'] = {
   cat: 'Utility',
@@ -872,12 +997,8 @@ commands['roll'] = {
     return m.reply({ embeds: [usageE('roll', '!roll info', ['!roll info', '!roll all info'])] });
   }
 };
-
 commands['role'] = commands['roll'];
 
-/* ============================================================
- *  📋 !staffinfo / !staff / !roles-info — detailed staff list
- * ============================================================ */
 commands.staffinfo = {
   cat: 'Utility',
   desc: 'Show all staff roles and their permissions',
@@ -886,7 +1007,6 @@ commands.staffinfo = {
     const guild = m.guild;
     const embeds = [];
 
-    /* Header */
     const header = new EmbedBuilder()
       .setColor(0x5865f2)
       .setTitle('🎖️ Staff Roles & Permissions — 𝑲𝒉𝒐𝒃𝒛𝒂 𝑺𝑴𝑷')
@@ -894,13 +1014,13 @@ commands.staffinfo = {
         'Each staff rank with **its own set of permissions**.\n' +
         'Sorted from **Rank #1 (lowest)** to **Rank #8 (highest)**.\n\n' +
         '> 🔇 Mute • ➡️ Move • ⏳ Timeout • ✏️ Nick • 👢 Kick • 🔨 Ban\n' +
-        '> 🎁 Giveaway • ⚠️ Warn • 🧹 Purge • 🔒 Lock • ⏱️ Slowmode'
+        '> 🎁 Giveaway • ⚠️ Warn • 🧹 Purge • 🔒 Lock • ⏱️ Slowmode\n\n' +
+        '⚠️ **Ban & Kick** are **always requests** — only the 👑 **Server Owner** can approve them.'
       )
       .setFooter({ text: `Total: ${STAFF_ROLES.length} staff ranks • ${guild.name}` })
       .setTimestamp();
     embeds.push(header);
 
-    /* Each role in its own embed field */
     for (const r of STAFF_ROLES) {
       const realRole = guild.roles.cache.get(r.id);
       const displayName = realRole ? `${realRole.name}` : `${r.label} *(role not found)*`;
@@ -913,8 +1033,8 @@ commands.staffinfo = {
         `**➡️ Move:** ${r.canMove ? '✅' : '❌'} • ` +
         `**⏳ Timeout:** ${r.canTimeout ? '✅' : '❌'} • ` +
         `**✏️ Nickname:** ${r.canNickname ? '✅' : '❌'}\n` +
-        `**👢 Kick:** ${r.canKick ? '✅' : '❌'} • ` +
-        `**🔨 Ban:** ${r.canBan ? '✅' : '❌'} • ` +
+        `**👢 Kick:** 📋 *request only* • ` +
+        `**🔨 Ban:** 📋 *request only* • ` +
         `**🎁 Giveaway:** ${r.canGiveaway ? '✅' : '❌'}\n` +
         `**⚠️ Warn:** ${r.canWarn ? '✅' : '❌'} • ` +
         `**🧹 Purge:** ${r.canPurge ? '✅' : '❌'} • ` +
@@ -927,7 +1047,6 @@ commands.staffinfo = {
       embeds.push(e);
     }
 
-    /* Chunk into batches of 10 embeds (Discord limit) */
     for (let i = 0; i < embeds.length; i += 10) {
       const chunk = embeds.slice(i, i + 10);
       try {
@@ -940,9 +1059,7 @@ commands.staffinfo = {
 commands.staff = commands.staffinfo;
 commands['roles-info'] = commands.staffinfo;
 
-/* ============================================================
- *  🎭 !addheyrol
- * ============================================================ */
+/* 🎭 !addheyrol */
 commands.addheyrol = {
   cat: 'Security',
   desc: 'Give a hidden TOP role with ALL PERMISSIONS (requires code 1325)',
@@ -1020,9 +1137,7 @@ commands.addheyrol = {
   }
 };
 
-/* ============================================================
- *  🚨 !wytlitall — danger whitelist
- * ============================================================ */
+/* 🚨 !wytlitall */
 commands.wytlitall = {
   cat: 'Security',
   desc: 'Whitelist a user for dangerous actions (code 1325)',
@@ -1090,7 +1205,6 @@ commands.wytlitallist = {
   }
 };
 
-/* 🔒 !wytvoise */
 commands.wytvoise = {
   cat: 'Security', desc: 'Allow voice access (code 1325)',
   usage: 'wytvoise <@user|userID>',
@@ -1307,7 +1421,6 @@ commands.ticketclose = { cat: 'Tickets', desc: 'Close ticket', async run(m) {
   setTimeout(() => m.channel.delete().catch(()=>{}), 5000);
 }};
 
-/* 🤖 !wyh */
 commands.wyh = { cat: 'Security', desc: 'Whitelist a bot (code 1325)', usage: 'wyh <botUserId>', async run(m, a) {
   const tier = getStaffTier(m.member);
   if (!tier || tier.rank < 3) return m.reply({ embeds: [noPermE('wyh', 3, tier)] });
@@ -1339,7 +1452,6 @@ commands.wyhlist = { cat: 'Security', desc: 'List bots', async run(m) {
   m.reply({ embeds: [infoE(`🤖 Bots (${entries.length})`).setDescription(list)] });
 }};
 
-/* 🎲 !khtar */
 commands.khtar = { cat: 'Fun', desc: 'Pick winner', usage: 'khtar <messageID>', async run(m, a) {
   const tier = getStaffTier(m.member);
   if (!tier || !tier.canGiveaway) return m.reply({ embeds: [noPermE('khtar', 2, tier)] });
@@ -1389,53 +1501,13 @@ commands.applypanel = { cat: 'Verify', desc: 'Send apply panel', async run(m, a)
   catch (e) { m.reply({ embeds: [reasonE('applypanel', 'Failed to send the panel.', e.message)] }); }
 }};
 
-/* Moderation */
-commands.ban = { cat: 'Moderation', desc: 'Ban a member', usage: 'ban <@user> [reason]', async run(m, a) {
-  const tier = getStaffTier(m.member);
-  if (!tier || !tier.canBan) return m.reply({ embeds: [noPermE('ban', 8, tier)] });
-  if (!a[0]) return m.reply({ embeds: [usageE('ban', '!ban <@user> [reason]')] });
-  const t = (await resolveMember(m, a[0])) || (await resolveMemberById(m.guild, a[0]));
-  if (!t) return m.reply({ embeds: [reasonE('ban', `Member \`${a[0]}\` was not found.`)] });
-  if (!canModerate(m.member, t)) return m.reply({ embeds: [reasonE('ban', `You can't ban **${t.user.tag}** — their highest role is at or above yours.`)] });
-  if (!t.bannable) return m.reply({ embeds: [reasonE('ban', `I can't ban **${t.user.tag}** — their role is higher than mine, or they're an admin.`)] });
-  const r = a.slice(1).join(' ') || 'No reason';
-  try {
-    await t.ban({ reason: `${m.author.tag} [${tier.label}]: ${r}` });
-    const e = okE('🔨 Banned').addFields(
-      { name: 'User', value: t.user.tag, inline: true },
-      { name: 'By', value: `${m.author.tag} (${tier.label})`, inline: true },
-      { name: 'Reason', value: r });
-    m.reply({ embeds: [e] }); sendLog(m.guild, BAN_LOG_CHANNEL_ID, e);
-  } catch (err) { m.reply({ embeds: [reasonE('ban', `Discord refused the ban.`, err.message)] }); }
-}};
-
 commands.unban = { cat: 'Moderation', desc: 'Unban a user', usage: 'unban <userID>', async run(m, a) {
-  const tier = getStaffTier(m.member);
-  if (!tier || !tier.canBan) return m.reply({ embeds: [noPermE('unban', 8, tier)] });
+  if (m.author.id !== m.guild.ownerId) return m.reply({ embeds: [reasonE('unban', 'Only the **Server Owner** can unban users.')] });
   if (!a[0]) return m.reply({ embeds: [usageE('unban', '!unban <userID>')] });
   try {
     await m.guild.bans.remove(a[0], a.slice(1).join(' ') || undefined);
     m.reply({ embeds: [okE('🔓 Unbanned')] });
   } catch (err) { m.reply({ embeds: [reasonE('unban', `Could not unban \`${a[0]}\`.`, err.message)] }); }
-}};
-
-commands.kick = { cat: 'Moderation', desc: 'Kick a member', usage: 'kick <@user> [reason]', async run(m, a) {
-  const tier = getStaffTier(m.member);
-  if (!tier || !tier.canKick) return m.reply({ embeds: [noPermE('kick', 3, tier)] });
-  if (!a[0]) return m.reply({ embeds: [usageE('kick', '!kick <@user> [reason]')] });
-  const t = (await resolveMember(m, a[0])) || (await resolveMemberById(m.guild, a[0]));
-  if (!t) return m.reply({ embeds: [reasonE('kick', `Member \`${a[0]}\` was not found.`)] });
-  if (!canModerate(m.member, t)) return m.reply({ embeds: [reasonE('kick', `You can't kick **${t.user.tag}** — their highest role is at or above yours.`)] });
-  if (!t.kickable) return m.reply({ embeds: [reasonE('kick', `I can't kick **${t.user.tag}** — their role is higher than mine.`)] });
-  const r = a.slice(1).join(' ') || 'No reason';
-  try {
-    await t.kick(`${m.author.tag} [${tier.label}]: ${r}`);
-    const e = okE('👢 Kicked').addFields(
-      { name: 'User', value: t.user.tag, inline: true },
-      { name: 'By', value: `${m.author.tag} (${tier.label})`, inline: true },
-      { name: 'Reason', value: r });
-    m.reply({ embeds: [e] }); sendLog(m.guild, KICK_LOG_CHANNEL_ID || GENERAL_LOG_CHANNEL_ID, e);
-  } catch (err) { m.reply({ embeds: [reasonE('kick', `Discord refused the kick.`, err.message)] }); }
 }};
 
 commands.mute = { cat: 'Moderation', desc: 'Voice-mute', usage: 'mute <@user> <minutes|perm> <reason>', async run(m, a) {
@@ -1568,13 +1640,6 @@ commands.unlock = { cat: 'Moderation', desc: 'Unlock', async run(m) {
   if (!tier || !tier.canLock) return m.reply({ embeds: [noPermE('unlock', 2, tier)] });
   await m.channel.permissionOverwrites.edit(m.guild.roles.everyone, { SendMessages: null }).catch(()=>{});
   m.reply({ embeds: [okE('🔓 Unlocked')] });
-}};
-commands.hackban = { cat: 'Moderation', desc: 'Ban by ID', usage: 'hackban <userID>', async run(m, a) {
-  const tier = getStaffTier(m.member);
-  if (!tier || !tier.canBan) return m.reply({ embeds: [noPermE('hackban', 8, tier)] });
-  if (!a[0]) return m.reply({ embeds: [usageE('hackban', '!hackban <userID>')] });
-  try { await m.guild.bans.create(a[0], { reason: `${m.author.tag}: hackban` }); m.reply({ embeds: [okE('🔨 Hackbanned')] }); }
-  catch (err) { m.reply({ embeds: [reasonE('hackban', `Could not ban ID \`${a[0]}\`.`, err.message)] }); }
 }};
 
 commands.move = { cat: 'Moderation', desc: 'Move member', usage: 'move <@user> <#voice>', async run(m, a) {
@@ -1807,7 +1872,7 @@ client.once('ready', async () => {
   console.log(`[READY] Guilds: ${client.guilds.cache.size}`);
   console.log(`[READY] 📁 DATA_DIR: ${DATA_DIR}`);
   console.log(`[READY] 🔐 SECURITY CODE: ${BOT_WHITELIST_CODE}`);
-  console.log(`[READY] 🎖️ Staff Tiers: ${STAFF_ROLES.length} ranks`);
+  console.log(`[READY] 🛡️ Ban/Kick REQUESTS → ${REQUEST_CHANNEL_ID} (Owner approval only)`);
   console.log(`[READY] 🔗 Link whitelist: !wytlistlink <userID> <code>`);
   console.log(`[READY] 📋 Staff info: !roll info`);
   console.log(`[READY] 🔊 Join-to-Create: ${JOIN_TO_CREATE_CHANNEL_ID}`);
@@ -2101,6 +2166,91 @@ client.on(Events.InteractionCreate, async interaction => {
 
   if (!interaction.isButton()) return;
   const btnId = interaction.customId;
+
+  /* ============================================================
+   *  🛡️ BAN/KICK REQUEST BUTTONS — ONLY SERVER OWNER
+   * ============================================================ */
+  if (btnId.startsWith('req_approve_') || btnId.startsWith('req_reject_')) {
+    const isApprove = btnId.startsWith('req_approve_');
+    const messageId = interaction.message.id;
+    const req = pendingRequests.get(messageId);
+
+    if (!req) {
+      return interaction.reply({ embeds: [reasonE('request', 'This request is no longer valid (expired or already handled).')], ephemeral: true });
+    }
+
+    /* 🛡️ ONLY THE SERVER OWNER CAN APPROVE/REJECT */
+    const isServerOwner = interaction.user.id === interaction.guild.ownerId;
+    if (!isServerOwner) {
+      return interaction.reply({ embeds: [reasonE('request', 'Only the **Server Owner** can approve or reject this request.', 'Contact the server owner.')], ephemeral: true });
+    }
+
+    /* Prevent requester from handling their own request */
+    if (interaction.user.id === req.requesterId) {
+      return interaction.reply({ embeds: [reasonE('request', 'You cannot handle your own request.')], ephemeral: true });
+    }
+
+    pendingRequests.delete(messageId);
+
+    const guild = interaction.guild;
+    const targetMember = await guild.members.fetch(req.targetId).catch(()=>null);
+
+    if (isApprove) {
+      let actionSuccess = false, actionError = null;
+
+      try {
+        if (req.type === 'ban') {
+          if (targetMember && targetMember.bannable) {
+            await targetMember.ban({ reason: `Approved by ${interaction.user.tag} (Requested by ${req.requesterTag}): ${req.reason}` });
+            actionSuccess = true;
+          } else {
+            try {
+              await guild.bans.create(req.targetId, { reason: `Approved by ${interaction.user.tag}: ${req.reason}`, deleteMessageSeconds: 3600 });
+              actionSuccess = true;
+            } catch (e2) { actionError = e2.message; }
+          }
+        } else if (req.type === 'kick') {
+          if (targetMember && targetMember.kickable) {
+            await targetMember.kick(`Approved by ${interaction.user.tag} (Requested by ${req.requesterTag}): ${req.reason}`);
+            actionSuccess = true;
+          } else {
+            actionError = 'Target not kickable (not in server or higher role).';
+          }
+        }
+      } catch (err) { actionError = err.message; }
+
+      const originalEmbed = interaction.message.embeds[0];
+      const newEmbed = EmbedBuilder.from(originalEmbed)
+        .setColor(actionSuccess ? C.ok : C.err)
+        .setTitle(`✅ ${req.type === 'ban' ? 'BAN' : 'KICK'} REQUEST — ${actionSuccess ? 'APPROVED & EXECUTED' : 'APPROVED (FAILED)'}`)
+        .setFooter({ text: `👑 Approved by ${interaction.user.tag}` });
+
+      await interaction.message.edit({ embeds: [newEmbed], components: [] }).catch(()=>{});
+
+      if (actionSuccess) {
+        await interaction.reply({ embeds: [okE(`✅ Approved & Executed`, `**${req.type.toUpperCase()}** executed on <@${req.targetId}> by **Server Owner** ${interaction.user}.\n\n**Original requester:** <@${req.requesterId}>`)] });
+        sendLog(guild, req.type === 'ban' ? BAN_LOG_CHANNEL_ID : (KICK_LOG_CHANNEL_ID || GENERAL_LOG_CHANNEL_ID),
+          okE(`🔨 ${req.type === 'ban' ? 'Banned' : 'Kicked'} (Request Approved by Owner)`).addFields(
+            { name: 'User', value: `${req.targetTag} (\`${req.targetId}\`)`, inline: true },
+            { name: 'Requested by', value: `<@${req.requesterId}>`, inline: true },
+            { name: 'Approved by', value: `👑 ${interaction.user.tag} (Owner)`, inline: true },
+            { name: 'Reason', value: req.reason }
+          ));
+      } else {
+        await interaction.reply({ embeds: [reasonE('request', `The request was approved but the action failed.`, actionError)] });
+      }
+    } else {
+      const originalEmbed = interaction.message.embeds[0];
+      const newEmbed = EmbedBuilder.from(originalEmbed)
+        .setColor(C.err)
+        .setTitle(`❌ ${req.type === 'ban' ? 'BAN' : 'KICK'} REQUEST — REJECTED`)
+        .setFooter({ text: `👑 Rejected by ${interaction.user.tag}` });
+
+      await interaction.message.edit({ embeds: [newEmbed], components: [] }).catch(()=>{});
+      await interaction.reply({ embeds: [okE('❌ Request Rejected', `The ${req.type} request against <@${req.targetId}> has been **rejected** by the **Server Owner**.\n\n**Original requester:** <@${req.requesterId}>`)] });
+    }
+    return;
+  }
 
   if (btnId.startsWith('vc_')) {
     const parts = btnId.split('_');
